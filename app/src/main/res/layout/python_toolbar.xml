@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Spec §31: exists only while the keyboard is visible, shown directly
+     above it. Horizontally scrollable so it stays compact (does not
+     consume excessive screen space) while exposing every control. -->
+<HorizontalScrollView
+    android:id="@+id/python_toolbar_scroll"
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="44dp"
+    android:background="@color/topbar_background"
+    android:scrollbars="none">
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="match_parent"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp">
+
+        <ImageButton android:id="@+id/tb_undo" style="@style/ToolbarKey" android:src="@drawable/ic_undo" />
+        <ImageButton android:id="@+id/tb_redo" style="@style/ToolbarKey" android:src="@drawable/ic_redo" />
+        <ImageButton android:id="@+id/tb_indent" style="@style/ToolbarKey" android:src="@drawable/ic_indent" />
+        <ImageButton android:id="@+id/tb_outdent" style="@style/ToolbarKey" android:src="@drawable/ic_outdent" />
+
+        <View style="@style/ToolbarDivider" />
+
+        <TextView android:id="@+id/tb_paren_open" style="@style/ToolbarTextKey" android:text="(" />
+        <TextView android:id="@+id/tb_paren_close" style="@style/ToolbarTextKey" android:text=")" />
+        <TextView android:id="@+id/tb_bracket_open" style="@style/ToolbarTextKey" android:text="[" />
+        <TextView android:id="@+id/tb_bracket_close" style="@style/ToolbarTextKey" android:text="]" />
+        <TextView android:id="@+id/tb_brace_open" style="@style/ToolbarTextKey" android:text="{" />
+        <TextView android:id="@+id/tb_brace_close" style="@style/ToolbarTextKey" android:text="}" />
+
+        <View style="@style/ToolbarDivider" />
+
+        <TextView android:id="@+id/tb_squote" style="@style/ToolbarTextKey" android:text="'" />
+        <TextView android:id="@+id/tb_dquote" style="@style/ToolbarTextKey" android:text="&quot;" />
+        <TextView android:id="@+id/tb_colon" style="@style/ToolbarTextKey" android:text=":" />
+        <TextView android:id="@+id/tb_underscore" style="@style/ToolbarTextKey" android:text="_" />
+        <TextView android:id="@+id/tb_hash" style="@style/ToolbarTextKey" android:text="#" />
+
+        <View style="@style/ToolbarDivider" />
+
+        <TextView android:id="@+id/tb_eq" style="@style/ToolbarTextKey" android:text="=" />
+        <TextView android:id="@+id/tb_eqeq" style="@style/ToolbarTextKey" android:text="==" />
+        <TextView android:id="@+id/tb_neq" style="@style/ToolbarTextKey" android:text="!=" />
+        <TextView android:id="@+id/tb_lt" style="@style/ToolbarTextKey" android:text="&lt;" />
+        <TextView android:id="@+id/tb_gt" style="@style/ToolbarTextKey" android:text="&gt;" />
+        <TextView android:id="@+id/tb_le" style="@style/ToolbarTextKey" android:text="&lt;=" />
+        <TextView android:id="@+id/tb_ge" style="@style/ToolbarTextKey" android:text="&gt;=" />
+        <TextView android:id="@+id/tb_plus" style="@style/ToolbarTextKey" android:text="+" />
+        <TextView android:id="@+id/tb_minus" style="@style/ToolbarTextKey" android:text="-" />
+        <TextView android:id="@+id/tb_mul" style="@style/ToolbarTextKey" android:text="*" />
+        <TextView android:id="@+id/tb_div" style="@style/ToolbarTextKey" android:text="/" />
+        <TextView android:id="@+id/tb_floordiv" style="@style/ToolbarTextKey" android:text="//" />
+        <TextView android:id="@+id/tb_mod" style="@style/ToolbarTextKey" android:text="%" />
+        <TextView android:id="@+id/tb_pow" style="@style/ToolbarTextKey" android:text="**" />
+
+        <View style="@style/ToolbarDivider" />
+
+        <TextView android:id="@+id/tb_arrow" style="@style/ToolbarTextKey" android:text="-&gt;" />
+        <TextView android:id="@+id/tb_at" style="@style/ToolbarTextKey" android:text="@" />
+        <TextView android:id="@+id/tb_ellipsis" style="@style/ToolbarTextKey" android:text="..." />
+
+    </LinearLayout>
+
+</HorizontalScrollView>

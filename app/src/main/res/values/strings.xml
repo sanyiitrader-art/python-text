@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PyEdit</string>
+
+    <string name="content_desc_hamburger">Open navigation drawer</string>
+    <string name="content_desc_run">Run</string>
+    <string name="content_desc_stop">Stop</string>
+    <string name="content_desc_more">More options</string>
+
+    <string name="drawer_recent">Recent</string>
+    <string name="drawer_clear">Clear</string>
+    <string name="drawer_root_folder">Root Folder</string>
+
+    <string name="menu_file">File</string>
+    <string name="menu_save">Save</string>
+    <string name="menu_save_as">Save As</string>
+    <string name="menu_autosave">Autosave</string>
+    <string name="menu_editing">Editing</string>
+    <string name="menu_find">Find</string>
+    <string name="menu_replace">Replace</string>
+    <string name="menu_go_to_line">Go to Line</string>
+    <string name="menu_python">Python</string>
+    <string name="menu_compile">Compile</string>
+    <string name="menu_settings">Settings</string>
+    <string name="menu_editor_settings">Editor Settings</string>
+
+    <string name="untitled_file">untitled.py</string>
+</resources>

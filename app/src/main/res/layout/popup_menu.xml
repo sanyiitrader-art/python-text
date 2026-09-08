@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:minWidth="200dp"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/popup_bg"
+    android:elevation="8dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="8dp">
+
+    <TextView android:text="@string/menu_file" style="@style/PopupMenu.SectionLabel" />
+    <TextView android:id="@+id/menu_item_save" android:text="@string/menu_save" style="@style/PopupMenu.Item" />
+    <TextView android:id="@+id/menu_item_save_as" android:text="@string/menu_save_as" style="@style/PopupMenu.Item" />
+
+    <LinearLayout
+        android:id="@+id/menu_item_autosave"
+        style="@style/PopupMenu.Item.Row">
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/menu_autosave"
+            android:textColor="@color/text_normal"
+            android:textSize="14sp" />
+        <CheckBox
+            android:id="@+id/checkbox_autosave"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:buttonTint="@color/mint_primary" />
+    </LinearLayout>
+
+    <View style="@style/PopupMenu.Divider" />
+
+    <TextView android:text="@string/menu_editing" style="@style/PopupMenu.SectionLabel" />
+    <TextView android:id="@+id/menu_item_find" android:text="@string/menu_find" style="@style/PopupMenu.Item" />
+    <TextView android:id="@+id/menu_item_replace" android:text="@string/menu_replace" style="@style/PopupMenu.Item" />
+    <TextView android:id="@+id/menu_item_go_to_line" android:text="@string/menu_go_to_line" style="@style/PopupMenu.Item" />
+
+    <View style="@style/PopupMenu.Divider" />
+
+    <TextView android:text="@string/menu_python" style="@style/PopupMenu.SectionLabel" />
+    <TextView android:id="@+id/menu_item_compile" android:text="@string/menu_compile" style="@style/PopupMenu.Item" />
+
+    <View style="@style/PopupMenu.Divider" />
+
+    <TextView android:text="@string/menu_settings" style="@style/PopupMenu.SectionLabel" />
+    <TextView android:id="@+id/menu_item_editor_settings" android:text="@string/menu_editor_settings" style="@style/PopupMenu.Item" />
+
+</LinearLayout>

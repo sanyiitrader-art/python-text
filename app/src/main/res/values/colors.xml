@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Exact palette from the spec — do not introduce other colors. -->
+    <color name="editor_background">#111315</color>
+    <color name="topbar_background">#181B1E</color>
+    <color name="gutter_background">#0D0F10</color>
+    <color name="mint_primary">#65E6B3</color>
+    <color name="text_normal">#E8ECEA</color>
+    <color name="text_comment">#78857F</color>
+    <color name="output_background">#0B0D0E</color>
+    <color name="popup_background">#1C2023</color>
+    <color name="border_divider">#292F2D</color>
+    <color name="cursor_color">#65E6B3</color>
+    <color name="error_color">#FF5C5C</color>
+    <color name="warning_color">#FFC857</color>
+    <color name="success_color">#58D68D</color>
+
+    <!-- Selection/highlight overlays use transparency of the mint accent,
+         per spec §15 ("transparency may be used for selection/highlight
+         effects"), not a new color. -->
+    <color name="selection_overlay">#3365E6B3</color>
+</resources>

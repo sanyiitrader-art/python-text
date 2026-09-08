@@ -1,0 +1,78 @@
+{
+    "name": "pyedit-theme",
+    "type": "dark",
+    "colors": {
+        "editor.background": "#111315",
+        "editor.foreground": "#E8ECEA",
+        "editorLineNumber.background": "#0D0F10",
+        "editorLineNumber.foreground": "#78857F",
+        "editorCursor.foreground": "#65E6B3",
+        "editor.selectionBackground": "#3365E6B3"
+    },
+    "tokenColors": [
+        {
+            "scope": "comment",
+            "settings": { "foreground": "#78857F" }
+        },
+        {
+            "scope": ["keyword", "keyword.control", "storage.type.function.python", "storage.type.class.python", "keyword.operator.logical.python"],
+            "settings": { "foreground": "#65E6B3" }
+        },
+        {
+            "scope": ["constant.language.python", "constant.numeric.python"],
+            "settings": { "foreground": "#FFC857" }
+        },
+        {
+            "scope": ["string.quoted.single.python", "string.quoted.double.python", "string.quoted.triple.python"],
+            "settings": { "foreground": "#58D68D" }
+        },
+        {
+            "scope": "constant.character.escape.python",
+            "settings": { "foreground": "#FFC857" }
+        },
+        {
+            "scope": ["entity.name.function.python", "meta.function-call.python"],
+            "settings": { "foreground": "#E8ECEA" }
+        },
+        {
+            "scope": "entity.name.class.python",
+            "settings": { "foreground": "#65E6B3" }
+        },
+        {
+            "scope": "entity.name.type.class.python",
+            "settings": { "foreground": "#65E6B3" }
+        },
+        {
+            "scope": "support.type.python",
+            "settings": { "foreground": "#65E6B3" }
+        },
+        {
+            "scope": "entity.name.decorator.python",
+            "settings": { "foreground": "#FFC857" }
+        },
+        {
+            "scope": "support.function.builtin.python",
+            "settings": { "foreground": "#E8ECEA" }
+        },
+        {
+            "scope": ["keyword.operator.python", "keyword.operator.arithmetic.python", "keyword.operator.comparison.python"],
+            "settings": { "foreground": "#E8ECEA" }
+        },
+        {
+            "scope": ["punctuation.definition.string.python", "punctuation.section.brackets.python"],
+            "settings": { "foreground": "#78857F" }
+        },
+        {
+            "scope": "variable.parameter.function.python",
+            "settings": { "foreground": "#E8ECEA" }
+        },
+        {
+            "scope": "keyword.control.import.python",
+            "settings": { "foreground": "#65E6B3" }
+        },
+        {
+            "scope": "invalid.illegal",
+            "settings": { "foreground": "#FF5C5C" }
+        }
+    ]
+}

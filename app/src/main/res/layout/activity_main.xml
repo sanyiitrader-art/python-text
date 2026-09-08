@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.drawerlayout.widget.DrawerLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/drawer_layout"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- Main content: top bar + editor -->
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/editor_background">
+
+        <!-- Top bar -->
+        <androidx.constraintlayout.widget.ConstraintLayout
+            android:id="@+id/top_bar"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:background="@color/topbar_background"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent">
+
+            <ImageButton
+                android:id="@+id/btn_hamburger"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_marginStart="4dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/content_desc_hamburger"
+                android:src="@drawable/ic_hamburger"
+                app:tint="@color/text_normal"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintBottom_toBottomOf="parent" />
+
+            <LinearLayout
+                android:id="@+id/right_actions"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintBottom_toBottomOf="parent">
+
+                <ImageButton
+                    android:id="@+id/btn_run"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/content_desc_run"
+                    android:src="@drawable/ic_run"
+                    app:tint="@color/mint_primary" />
+
+                <ImageButton
+                    android:id="@+id/btn_menu"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_marginEnd="4dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/content_desc_more"
+                    android:src="@drawable/ic_more_vert"
+                    app:tint="@color/text_normal" />
+
+            </LinearLayout>
+
+            <!-- layout_width=0dp constrained between the two side elements
+                 makes this genuinely center within *available* top-bar
+                 space (spec §16), not just sit after the hamburger. -->
+            <TextView
+                android:id="@+id/tv_filename"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:singleLine="true"
+                android:ellipsize="middle"
+                android:textColor="@color/text_normal"
+                android:textSize="16sp"
+                android:text="@string/untitled_file"
+                app:layout_constraintStart_toEndOf="@id/btn_hamburger"
+                app:layout_constraintEnd_toStartOf="@id/right_actions"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintBottom_toBottomOf="parent" />
+
+        </androidx.constraintlayout.widget.ConstraintLayout>
+
+        <!-- Single divider between top bar and editor (spec §16) -->
+        <View
+            android:id="@+id/top_bar_divider"
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/border_divider"
+            app:layout_constraintTop_toBottomOf="@id/top_bar" />
+
+        <!-- The sora-editor CodeEditor view is added here in code -->
+        <FrameLayout
+            android:id="@+id/editor_container"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            app:layout_constraintTop_toBottomOf="@id/top_bar_divider"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
+
+    <!-- Navigation drawer. layout_width here is a placeholder; MainActivity
+         resizes it at runtime to exactly 95% of screen width (spec §17),
+         since a screen-relative percentage can't be expressed in dp/XML. -->
+    <include
+        android:id="@+id/drawer_content"
+        layout="@layout/drawer_content"
+        android:layout_width="304dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="start" />
+
+</androidx.drawerlayout.widget.DrawerLayout>

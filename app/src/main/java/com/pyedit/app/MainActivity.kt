@@ -4,16 +4,14 @@ import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.widget.CheckBox
+import android.widget.FrameLayout
 import android.widget.PopupWindow
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.drawerlayout.widget.DrawerLayout
 import com.pyedit.app.databinding.ActivityMainBinding
 import com.pyedit.app.databinding.PopupMenuBinding
 import io.github.rosemoe.sora.widget.CodeEditor
-import io.github.rosemoe.sora.widget.schemes.SchemeDarcula
 
 class MainActivity : AppCompatActivity() {
 
@@ -28,14 +26,10 @@ class MainActivity : AppCompatActivity() {
         sizeDrawerToScreenWidth()
         setupTopBar()
         setupEditor()
+        setupPythonToolbar()
         setupKeyboardAwareInsets()
     }
 
-    /**
-     * Spec §17: drawer covers ~95% of screen width, leaving ~5% exposed.
-     * Expressed as a runtime calculation rather than a fixed dp value so
-     * it holds across all screen sizes, not just the 720px reference.
-     */
     private fun sizeDrawerToScreenWidth() {
         val screenWidth = resources.displayMetrics.widthPixels
         val drawerWidth = (screenWidth * 0.95f).toInt()
@@ -46,21 +40,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupTopBar() {
         binding.btnHamburger.setOnClickListener {
-            binding.drawerLayout.openDrawer(GravityCompatStart)
+            binding.drawerLayout.openDrawer(Gravity.START)
         }
-
         binding.btnMenu.setOnClickListener { anchor -> showThreeDotMenu(anchor) }
-
-        binding.drawerContent.tvClearRecent.setOnClickListener {
-            // Recent-record clearing is wired up in Phase 2 once the
-            // persistent Recent list exists. Phase 1 has nothing to clear.
-        }
     }
 
-    /**
-     * Spec §20: compact, content-sized, rounded popup anchored near the
-     * three-dot button — explicitly NOT a full-screen page/drawer/sheet.
-     */
     private fun showThreeDotMenu(anchor: View) {
         val popupBinding = PopupMenuBinding.inflate(layoutInflater)
         val popup = PopupWindow(
@@ -71,82 +55,88 @@ class MainActivity : AppCompatActivity() {
         )
         popup.elevation = 8f
 
-        // File section (Save/Save As wired in Phase 2 — file system doesn't
-        // exist yet in Phase 1). Autosave checkbox state persists in Phase 2.
-        val autosaveCheckbox: CheckBox = popupBinding.checkboxAutosave
-
-        popupBinding.menuItemFind.setOnClickListener { popup.dismiss() }
-        popupBinding.menuItemReplace.setOnClickListener { popup.dismiss() }
-        popupBinding.menuItemGoToLine.setOnClickListener { popup.dismiss() }
-        popupBinding.menuItemCompile.setOnClickListener { popup.dismiss() }
-        popupBinding.menuItemEditorSettings.setOnClickListener { popup.dismiss() }
-        popupBinding.menuItemSave.setOnClickListener { popup.dismiss() }
-        popupBinding.menuItemSaveAs.setOnClickListener { popup.dismiss() }
+        val dismissOnly = View.OnClickListener { popup.dismiss() }
+        popupBinding.menuItemSave.setOnClickListener(dismissOnly)
+        popupBinding.menuItemSaveAs.setOnClickListener(dismissOnly)
+        popupBinding.menuItemFind.setOnClickListener(dismissOnly)
+        popupBinding.menuItemReplace.setOnClickListener(dismissOnly)
+        popupBinding.menuItemGoToLine.setOnClickListener(dismissOnly)
+        popupBinding.menuItemCompile.setOnClickListener(dismissOnly)
+        popupBinding.menuItemEditorSettings.setOnClickListener(dismissOnly)
 
         popup.showAsDropDown(anchor, 0, 8)
     }
 
     private fun setupEditor() {
         editor = CodeEditor(this)
-        editor.setLayoutParams(
-            ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
+        editor.layoutParams = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT
         )
         binding.editorContainer.addView(editor)
 
-        // No line wrapping (spec §24) — horizontal scroll instead.
         editor.isWordwrap = false
 
-        applyColorScheme(editor)
         PythonLanguage.attach(this, editor)
-
-        // Cursor stops blinking when the editor isn't the active input
-        // target (spec §28).
-        editor.isEditable = true
     }
 
-    private fun applyColorScheme(editor: CodeEditor) {
-        // Base scheme; PythonLanguage.attach() overlays the TextMate theme
-        // (built from pyedit-theme.json) on top of this once grammars load.
-        val scheme = SchemeDarcula()
-        scheme.setColor(io.github.rosemoe.sora.widget.schemes.EditorColorScheme.WHOLE_BACKGROUND,
-            getColorCompat(R.color.editor_background))
-        scheme.setColor(io.github.rosemoe.sora.widget.schemes.EditorColorScheme.LINE_NUMBER_BACKGROUND,
-            getColorCompat(R.color.gutter_background))
-        scheme.setColor(io.github.rosemoe.sora.widget.schemes.EditorColorScheme.LINE_NUMBER,
-            getColorCompat(R.color.text_comment))
-        scheme.setColor(io.github.rosemoe.sora.widget.schemes.EditorColorScheme.SELECTED_TEXT_BACKGROUND,
-            getColorCompat(R.color.selection_overlay))
-        scheme.setColor(io.github.rosemoe.sora.widget.schemes.EditorColorScheme.CURSOR,
-            getColorCompat(R.color.cursor_color))
-        scheme.setColor(io.github.rosemoe.sora.widget.schemes.EditorColorScheme.TEXT_NORMAL,
-            getColorCompat(R.color.text_normal))
-        editor.colorScheme = scheme
+    private fun setupPythonToolbar() {
+        val tb = binding.pythonToolbar
+        val insert: (String) -> Unit = { s -> editor.commitText(s) }
+
+        tb.tbUndo.setOnClickListener { if (editor.canUndo()) editor.undo() }
+        tb.tbRedo.setOnClickListener { if (editor.canRedo()) editor.redo() }
+        tb.tbIndent.setOnClickListener { insert("    ") }
+        tb.tbOutdent.setOnClickListener { removeOneIndentLevel() }
+
+        tb.tbParenOpen.setOnClickListener { insert("(") }
+        tb.tbParenClose.setOnClickListener { insert(")") }
+        tb.tbBracketOpen.setOnClickListener { insert("[") }
+        tb.tbBracketClose.setOnClickListener { insert("]") }
+        tb.tbBraceOpen.setOnClickListener { insert("{") }
+        tb.tbBraceClose.setOnClickListener { insert("}") }
+        tb.tbSquote.setOnClickListener { insert("'") }
+        tb.tbDquote.setOnClickListener { insert("\"") }
+        tb.tbColon.setOnClickListener { insert(":") }
+        tb.tbUnderscore.setOnClickListener { insert("_") }
+        tb.tbHash.setOnClickListener { insert("#") }
+        tb.tbEq.setOnClickListener { insert("=") }
+        tb.tbEqeq.setOnClickListener { insert("==") }
+        tb.tbNeq.setOnClickListener { insert("!=") }
+        tb.tbLt.setOnClickListener { insert("<") }
+        tb.tbGt.setOnClickListener { insert(">") }
+        tb.tbLe.setOnClickListener { insert("<=") }
+        tb.tbGe.setOnClickListener { insert(">=") }
+        tb.tbPlus.setOnClickListener { insert("+") }
+        tb.tbMinus.setOnClickListener { insert("-") }
+        tb.tbMul.setOnClickListener { insert("*") }
+        tb.tbDiv.setOnClickListener { insert("/") }
+        tb.tbFloordiv.setOnClickListener { insert("//") }
+        tb.tbMod.setOnClickListener { insert("%") }
+        tb.tbPow.setOnClickListener { insert("**") }
+        tb.tbArrow.setOnClickListener { insert("->") }
+        tb.tbAt.setOnClickListener { insert("@") }
+        tb.tbEllipsis.setOnClickListener { insert("...") }
     }
 
-    private fun getColorCompat(resId: Int): Int =
-        androidx.core.content.ContextCompat.getColor(this, resId)
-
-    /**
-     * Spec §27: usable editor area is bounded by the keyboard/toolbar's
-     * top edge, not the physical screen bottom. windowSoftInputMode=
-     * adjustResize (set in the manifest) plus IME insets here keep the
-     * cursor's safe area accurate as the keyboard height changes.
-     */
-    private fun setupKeyboardAwareInsets() {
-        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
-            val imeHeight = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
-            editor.setPadding(
-                editor.paddingLeft,
-                editor.paddingTop,
-                editor.paddingRight,
-                imeHeight
-            )
-            insets
+    private fun removeOneIndentLevel() {
+        val line = editor.cursor.leftLine
+        val col = editor.cursor.leftColumn
+        val lineText = editor.text.getLineString(line)
+        val prefix = lineText.substring(0, col)
+        val trailingSpaces = prefix.takeLastWhile { it == ' ' }.length
+        val toRemove = minOf(trailingSpaces, 4)
+        if (toRemove > 0) {
+            editor.text.delete(line, col - toRemove, line, col)
         }
     }
 
-    private val GravityCompatStart get() = Gravity.START
+    private fun setupKeyboardAwareInsets() {
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
+            val keyboardVisible = insets.isVisible(WindowInsetsCompat.Type.ime())
+            binding.pythonToolbar.root.visibility =
+                if (keyboardVisible) View.VISIBLE else View.GONE
+            insets
+        }
+    }
 }

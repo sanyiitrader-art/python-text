@@ -6,12 +6,16 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.PopupWindow
+import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.pyedit.app.databinding.ActivityMainBinding
 import com.pyedit.app.databinding.PopupMenuBinding
 import io.github.rosemoe.sora.widget.CodeEditor
+import java.io.PrintWriter
+import java.io.StringWriter
 
 class MainActivity : AppCompatActivity() {
 
@@ -77,7 +81,37 @@ class MainActivity : AppCompatActivity() {
 
         editor.isWordwrap = false
 
-        PythonLanguage.attach(this, editor)
+        // TextMate grammar/theme attachment is an enhancement, not core
+        // editor functionality — a failure here must NOT crash the whole
+        // app. Catching Throwable (not just Exception) deliberately, since
+        // library init issues can surface as Error subclasses too. On
+        // failure, the editor still works (Phase 1's other 90% of
+        // requirements are unaffected), and we surface the real exception
+        // on-screen since there's no ADB/logcat access available to debug
+        // this remotely otherwise.
+        try {
+            PythonLanguage.attach(this, editor)
+        } catch (t: Throwable) {
+            showCrashDiagnostic(t)
+        }
+    }
+
+    private fun showCrashDiagnostic(t: Throwable) {
+        val sw = StringWriter()
+        t.printStackTrace(PrintWriter(sw))
+        val fullTrace = sw.toString()
+
+        Toast.makeText(
+            this,
+            "Syntax highlighting failed to load — editor still works. Tap to see details.",
+            Toast.LENGTH_LONG
+        ).show()
+
+        AlertDialog.Builder(this)
+            .setTitle("TextMate attach failed")
+            .setMessage(fullTrace)
+            .setPositiveButton("OK", null)
+            .show()
     }
 
     private fun setupPythonToolbar() {

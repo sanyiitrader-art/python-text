@@ -11,15 +11,6 @@ import io.github.rosemoe.sora.langs.textmate.registry.provider.AssetsFileResolve
 import io.github.rosemoe.sora.widget.CodeEditor
 import org.eclipse.tm4e.core.registry.IThemeSource
 
-/**
- * Attempt 2 at TextMate wiring: loads grammars from a JSON manifest
- * (assets/textmate/grammars.json) instead of constructing a
- * GrammarDefinition directly in Kotlin, since that constructor/factory
- * could not be verified for this library version. Every other call here
- * (FileProviderRegistry, ThemeModel, IThemeSource, TextMateColorScheme,
- * TextMateLanguage.create) already compiled successfully in the previous
- * round, so only the grammar-loading line is new/unverified this time.
- */
 object PythonLanguage {
 
     private var registered = false
@@ -28,6 +19,9 @@ object PythonLanguage {
     private const val THEME_PATH = "textmate/pyedit-theme.json"
     private const val THEME_NAME = "pyedit-theme"
 
+    // No change to logic here — the fix for the crash is entirely on the
+    // MainActivity.kt side (catching what this throws). Unchanged file,
+    // resent only so both files in this round match exactly.
     fun attach(context: Context, editor: CodeEditor) {
         ensureRegistered(context)
 

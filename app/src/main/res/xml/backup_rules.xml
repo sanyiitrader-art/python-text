@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- No app-specific backup rules needed yet: the Python workspace
+         lives in app-private external storage, which Android's default
+         backup already excludes from cloud backup, so there's nothing
+         extra to exclude or include here for Phase 1. -->
+</full-backup-content>

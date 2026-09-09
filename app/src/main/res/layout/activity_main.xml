@@ -6,13 +6,11 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <!-- Main content: top bar + editor -->
     <androidx.constraintlayout.widget.ConstraintLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:background="@color/editor_background">
 
-        <!-- Top bar -->
         <androidx.constraintlayout.widget.ConstraintLayout
             android:id="@+id/top_bar"
             android:layout_width="match_parent"
@@ -66,9 +64,6 @@
 
             </LinearLayout>
 
-            <!-- layout_width=0dp constrained between the two side elements
-                 makes this genuinely center within *available* top-bar
-                 space (spec §16), not just sit after the hamburger. -->
             <TextView
                 android:id="@+id/tv_filename"
                 android:layout_width="0dp"
@@ -86,7 +81,6 @@
 
         </androidx.constraintlayout.widget.ConstraintLayout>
 
-        <!-- Single divider between top bar and editor (spec §16) -->
         <View
             android:id="@+id/top_bar_divider"
             android:layout_width="match_parent"
@@ -94,21 +88,27 @@
             android:background="@color/border_divider"
             app:layout_constraintTop_toBottomOf="@id/top_bar" />
 
-        <!-- The sora-editor CodeEditor view is added here in code -->
         <FrameLayout
             android:id="@+id/editor_container"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             app:layout_constraintTop_toBottomOf="@id/top_bar_divider"
-            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintBottom_toTopOf="@id/python_toolbar"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent" />
 
+        <include
+            android:id="@+id/python_toolbar"
+            layout="@layout/python_toolbar"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:visibility="gone"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent" />
+
     </androidx.constraintlayout.widget.ConstraintLayout>
 
-    <!-- Navigation drawer. layout_width here is a placeholder; MainActivity
-         resizes it at runtime to exactly 95% of screen width (spec §17),
-         since a screen-relative percentage can't be expressed in dp/XML. -->
     <include
         android:id="@+id/drawer_content"
         layout="@layout/drawer_content"

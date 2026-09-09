@@ -1,41 +1,57 @@
 package com.pyedit.app
 
 import android.content.Context
+import io.github.rosemoe.sora.langs.textmate.TextMateColorScheme
+import io.github.rosemoe.sora.langs.textmate.TextMateLanguage
+import io.github.rosemoe.sora.langs.textmate.registry.FileProviderRegistry
+import io.github.rosemoe.sora.langs.textmate.registry.GrammarRegistry
+import io.github.rosemoe.sora.langs.textmate.registry.ThemeRegistry
+import io.github.rosemoe.sora.langs.textmate.registry.model.ThemeModel
+import io.github.rosemoe.sora.langs.textmate.registry.provider.AssetsFileResolver
 import io.github.rosemoe.sora.widget.CodeEditor
-import io.github.rosemoe.sora.widget.schemes.EditorColorScheme
+import org.eclipse.tm4e.core.registry.IThemeSource
 
 /**
- * TEMPORARY for Phase 1's compile gate: applies a manual color scheme
- * using the stable, documented EditorColorScheme public API instead of
- * sora-editor's TextMate grammar-registry bootstrap, whose exact
- * constructor/factory signatures for this version I could not verify
- * from documentation and got wrong three times in a row — not worth
- * further guessing against your CI runs.
- *
- * Full TextMate-based Python syntax highlighting (spec §40) is
- * re-added as its own isolated, testable step immediately after this
- * compiles — nothing about this is a permanent scope cut.
+ * Attempt 2 at TextMate wiring: loads grammars from a JSON manifest
+ * (assets/textmate/grammars.json) instead of constructing a
+ * GrammarDefinition directly in Kotlin, since that constructor/factory
+ * could not be verified for this library version. Every other call here
+ * (FileProviderRegistry, ThemeModel, IThemeSource, TextMateColorScheme,
+ * TextMateLanguage.create) already compiled successfully in the previous
+ * round, so only the grammar-loading line is new/unverified this time.
  */
 object PythonLanguage {
 
+    private var registered = false
+    private const val GRAMMAR_SCOPE = "source.python"
+    private const val GRAMMARS_MANIFEST = "textmate/grammars.json"
+    private const val THEME_PATH = "textmate/pyedit-theme.json"
+    private const val THEME_NAME = "pyedit-theme"
+
     fun attach(context: Context, editor: CodeEditor) {
-        val scheme = object : EditorColorScheme() {
-            init {
-                setColor(WHOLE_BACKGROUND, colorInt(context, R.color.editor_background))
-                setColor(LINE_NUMBER_BACKGROUND, colorInt(context, R.color.gutter_background))
-                setColor(LINE_NUMBER, colorInt(context, R.color.text_comment))
-                setColor(LINE_NUMBER_CURRENT, colorInt(context, R.color.mint_primary))
-                setColor(SELECTED_TEXT_BACKGROUND, colorInt(context, R.color.selection_overlay))
-                setColor(SELECTION_INSERT, colorInt(context, R.color.cursor_color))
-                setColor(TEXT_NORMAL, colorInt(context, R.color.text_normal))
-                setColor(COMMENT, colorInt(context, R.color.text_comment))
-                setColor(KEYWORD, colorInt(context, R.color.mint_primary))
-                setColor(LITERAL, colorInt(context, R.color.warning_color))
-            }
-        }
-        editor.colorScheme = scheme
+        ensureRegistered(context)
+
+        val language = TextMateLanguage.create(GRAMMAR_SCOPE, true)
+        editor.setEditorLanguage(language)
+        editor.colorScheme = TextMateColorScheme.create(ThemeRegistry.getInstance())
     }
 
-    private fun colorInt(context: Context, resId: Int): Int =
-        androidx.core.content.ContextCompat.getColor(context, resId)
+    private fun ensureRegistered(context: Context) {
+        if (registered) return
+
+        FileProviderRegistry.getInstance().addFileProvider(
+            AssetsFileResolver(context.assets)
+        )
+
+        GrammarRegistry.getInstance().loadGrammars(GRAMMARS_MANIFEST)
+
+        val themeSource = IThemeSource.fromInputStream(
+            FileProviderRegistry.getInstance().tryGetInputStream(THEME_PATH),
+            THEME_PATH,
+            null
+        )
+        ThemeRegistry.getInstance().loadTheme(ThemeModel(themeSource, THEME_NAME))
+
+        registered = true
+    }
 }

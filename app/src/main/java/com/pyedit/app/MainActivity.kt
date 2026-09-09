@@ -9,11 +9,13 @@ import android.widget.PopupWindow
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.pyedit.app.databinding.ActivityMainBinding
 import com.pyedit.app.databinding.PopupMenuBinding
 import io.github.rosemoe.sora.widget.CodeEditor
+import io.github.rosemoe.sora.widget.schemes.EditorColorScheme
 import java.io.PrintWriter
 import java.io.StringWriter
 
@@ -81,20 +83,39 @@ class MainActivity : AppCompatActivity() {
 
         editor.isWordwrap = false
 
-        // TextMate grammar/theme attachment is an enhancement, not core
-        // editor functionality — a failure here must NOT crash the whole
-        // app. Catching Throwable (not just Exception) deliberately, since
-        // library init issues can surface as Error subclasses too. On
-        // failure, the editor still works (Phase 1's other 90% of
-        // requirements are unaffected), and we surface the real exception
-        // on-screen since there's no ADB/logcat access available to debug
-        // this remotely otherwise.
+        // Safety net: apply our dark palette as the baseline FIRST, before
+        // attempting TextMate. This is what was missing last round — if
+        // TextMate throws, sora-editor's own default (light/white) scheme
+        // was left in place instead. Now a TextMate failure can only mean
+        // "no syntax colors", never "unreadable white editor".
+        applyFallbackColorScheme()
+
         try {
             PythonLanguage.attach(this, editor)
         } catch (t: Throwable) {
             showCrashDiagnostic(t)
         }
     }
+
+    private fun applyFallbackColorScheme() {
+        val scheme = object : EditorColorScheme() {
+            init {
+                setColor(WHOLE_BACKGROUND, colorInt(R.color.editor_background))
+                setColor(LINE_NUMBER_BACKGROUND, colorInt(R.color.gutter_background))
+                setColor(LINE_NUMBER, colorInt(R.color.text_comment))
+                setColor(LINE_NUMBER_CURRENT, colorInt(R.color.mint_primary))
+                setColor(SELECTED_TEXT_BACKGROUND, colorInt(R.color.selection_overlay))
+                setColor(SELECTION_INSERT, colorInt(R.color.cursor_color))
+                setColor(TEXT_NORMAL, colorInt(R.color.text_normal))
+                setColor(COMMENT, colorInt(R.color.text_comment))
+                setColor(KEYWORD, colorInt(R.color.mint_primary))
+                setColor(LITERAL, colorInt(R.color.warning_color))
+            }
+        }
+        editor.colorScheme = scheme
+    }
+
+    private fun colorInt(resId: Int): Int = ContextCompat.getColor(this, resId)
 
     private fun showCrashDiagnostic(t: Throwable) {
         val sw = StringWriter()

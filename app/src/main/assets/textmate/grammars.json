@@ -1,8 +1,6 @@
-[
-    {
-        "name": "Python",
-        "scopeName": "source.python",
-        "grammar": "textmate/python.tmLanguage.json",
-        "languageConfiguration": "textmate/language-configuration.json"
-    }
-]
+{
+    "name": "Python",
+    "scopeName": "source.python",
+    "grammar": "textmate/python.tmLanguage.json",
+    "languageConfiguration": "textmate/language-configuration.json"
+}

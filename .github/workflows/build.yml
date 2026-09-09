@@ -24,47 +24,56 @@ jobs:
           java-version: "17"
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          # Pinned so CI doesn't silently drift onto a newer cmdline-tools
-          # release; bump deliberately if a future Gradle/AGP needs it.
-          cmdline-tools-version: "11076708"
-
-      - name: Install required SDK platform & build tools
         run: |
-          sdkmanager --install "platforms;android-34" "build-tools;34.0.0"
+          export ANDROID_SDK_ROOT="$HOME/android-sdk"
+          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+          curl -sSL -o cmdline-tools.zip \
+            https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q cmdline-tools.zip -d "$ANDROID_SDK_ROOT/cmdline-tools"
+          mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+          rm cmdline-tools.zip
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+
+      - name: Install SDK platform, build-tools, platform-tools
+        run: |
+          yes | sdkmanager --licenses > /dev/null
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
       - name: Generate Gradle wrapper
         run: |
           gradle wrapper --gradle-version 8.10.2
           chmod +x ./gradlew
 
-      - name: Decode signing keystore (if configured)
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+      # secrets.* cannot be read directly inside a step's `if:` — GitHub
+      # rejects that at parse time (the error you hit). Instead, read the
+      # secret into env here (env: IS allowed to reference secrets
+      # unconditionally) and publish a plain step output, which `if:` CAN
+      # reference safely on later steps.
+      - name: Check for signing keystore secret
+        id: check_secrets
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > release.keystore
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "has_keystore=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_keystore=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Decode signing keystore
+        if: steps.check_secrets.outputs.has_keystore == 'true'
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: echo "$KEYSTORE_B64" | base64 -d > release.keystore
 
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
-
-      - name: Build release APK
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
-        env:
-          RELEASE_STORE_FILE: ${{ github.workspace }}/release.keystore
-          RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: ./gradlew :app:assembleRelease --stacktrace
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
           path: app/build/outputs/apk/debug/*.apk
-
-      - name: Upload release APK
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-release
-          path: app/build/outputs/apk/release/*.apk

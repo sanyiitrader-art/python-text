@@ -12,6 +12,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install ImageMagick
+        run: sudo apt-get update && sudo apt-get install -y imagemagick
+
       - name: Generate launcher icon resources
         run: |
           chmod +x scripts/generate_icons.sh
@@ -47,11 +50,6 @@ jobs:
           gradle wrapper --gradle-version 8.10.2
           chmod +x ./gradlew
 
-      # secrets.* cannot be read directly inside a step's `if:` — GitHub
-      # rejects that at parse time (the error you hit). Instead, read the
-      # secret into env here (env: IS allowed to reference secrets
-      # unconditionally) and publish a plain step output, which `if:` CAN
-      # reference safely on later steps.
       - name: Check for signing keystore secret
         id: check_secrets
         env:

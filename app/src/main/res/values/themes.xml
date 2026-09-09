@@ -1,5 +1,66 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <style name="Theme.PyEdit" parent="Theme.MaterialComponents.NoActionBar">
+        <item name="colorPrimary">@color/mint_primary</item>
+        <item name="colorPrimaryDark">@color/topbar_background</item>
+        <item name="colorAccent">@color/mint_primary</item>
+        <item name="android:windowBackground">@color/editor_background</item>
+        <item name="android:statusBarColor">@color/topbar_background</item>
+        <item name="android:navigationBarColor">@color/editor_background</item>
+        <item name="android:textColor">@color/text_normal</item>
+        <item name="android:textColorPrimary">@color/text_normal</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
+    <!-- Renamed without dots to avoid Android's implicit-parent-style
+         lookup (a name like "PopupMenu.SectionLabel" is otherwise treated
+         as "inherit from a style literally named PopupMenu", which
+         doesn't exist and fails resource linking). -->
+    <style name="PopupSectionLabel">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:paddingStart">16dp</item>
+        <item name="android:paddingEnd">16dp</item>
+        <item name="android:paddingTop">8dp</item>
+        <item name="android:paddingBottom">4dp</item>
+        <item name="android:textColor">@color/mint_primary</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="PopupItem">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:paddingStart">16dp</item>
+        <item name="android:paddingEnd">16dp</item>
+        <item name="android:paddingTop">10dp</item>
+        <item name="android:paddingBottom">10dp</item>
+        <item name="android:textColor">@color/text_normal</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:background">?attr/selectableItemBackground</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+    </style>
+
+    <style name="PopupItemRow">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:orientation">horizontal</item>
+        <item name="android:paddingStart">16dp</item>
+        <item name="android:paddingEnd">16dp</item>
+        <item name="android:paddingTop">10dp</item>
+        <item name="android:paddingBottom">10dp</item>
+        <item name="android:gravity">center_vertical</item>
+    </style>
+
+    <style name="PopupDivider">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">1dp</item>
+        <item name="android:layout_marginTop">6dp</item>
+        <item name="android:layout_marginBottom">6dp</item>
+        <item name="android:background">@color/border_divider</item>
+    </style>
+
     <style name="ToolbarKey">
         <item name="android:layout_width">40dp</item>
         <item name="android:layout_height">40dp</item>
@@ -24,67 +85,5 @@
         <item name="android:layout_marginStart">4dp</item>
         <item name="android:layout_marginEnd">4dp</item>
         <item name="android:background">@color/border_divider</item>
-    </style>
-    <style name="PopupMenu.SectionLabel">
-        <item name="android:layout_width">match_parent</item>
-        <item name="android:layout_height">wrap_content</item>
-        <item name="android:paddingStart">16dp</item>
-        <item name="android:paddingEnd">16dp</item>
-        <item name="android:paddingTop">8dp</item>
-        <item name="android:paddingBottom">4dp</item>
-        <item name="android:textColor">@color/mint_primary</item>
-        <item name="android:textSize">12sp</item>
-        <item name="android:textStyle">bold</item>
-    </style>
-
-    <style name="PopupMenu.Item">
-        <item name="android:layout_width">match_parent</item>
-        <item name="android:layout_height">wrap_content</item>
-        <item name="android:paddingStart">16dp</item>
-        <item name="android:paddingEnd">16dp</item>
-        <item name="android:paddingTop">10dp</item>
-        <item name="android:paddingBottom">10dp</item>
-        <item name="android:textColor">@color/text_normal</item>
-        <item name="android:textSize">14sp</item>
-        <item name="android:background">?attr/selectableItemBackground</item>
-        <item name="android:clickable">true</item>
-        <item name="android:focusable">true</item>
-    </style>
-
-    <style name="PopupMenu.Item.Row">
-        <item name="android:layout_width">match_parent</item>
-        <item name="android:layout_height">wrap_content</item>
-        <item name="android:orientation">horizontal</item>
-        <item name="android:paddingStart">16dp</item>
-        <item name="android:paddingEnd">16dp</item>
-        <item name="android:paddingTop">10dp</item>
-        <item name="android:paddingBottom">10dp</item>
-        <item name="android:gravity">center_vertical</item>
-    </style>
-
-    <style name="PopupMenu.Divider">
-        <item name="android:layout_width">match_parent</item>
-        <item name="android:layout_height">1dp</item>
-        <item name="android:layout_marginTop">6dp</item>
-        <item name="android:layout_marginBottom">6dp</item>
-        <item name="android:background">@color/border_divider</item>
-    </style>
-    <style name="Theme.PyEdit" parent="Theme.MaterialComponents.NoActionBar">
-        <item name="colorPrimary">@color/mint_primary</item>
-        <item name="colorPrimaryDark">@color/topbar_background</item>
-        <item name="colorAccent">@color/mint_primary</item>
-
-        <item name="android:windowBackground">@color/editor_background</item>
-        <item name="android:statusBarColor">@color/topbar_background</item>
-        <item name="android:navigationBarColor">@color/editor_background</item>
-        <item name="android:textColor">@color/text_normal</item>
-        <item name="android:textColorPrimary">@color/text_normal</item>
-
-        <!-- Fixed dark palette by design (spec §15) — not day/night aware. -->
-        <item name="android:windowLightStatusBar">false</item>
-    </style>
-
-    <style name="PopupMenu.PyEdit">
-        <item name="android:popupBackground">@drawable/popup_bg</item>
     </style>
 </resources>

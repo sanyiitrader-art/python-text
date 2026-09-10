@@ -15,8 +15,6 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        // Required Android ABI families (spec §10). Chaquopy bundles a
-        // matching native CPython runtime + stdlib for each of these.
         ndk {
             abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
         }
@@ -49,16 +47,10 @@ android {
     }
 
     packaging {
-        // Chaquopy's own native libs can trigger duplicate-META-INF
-        // warnings from transitive deps; keep the build clean.
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
 }
 
-// Phase 1 does not yet execute Python (that's Phase 2), but the plugin
-// must be configured now since it drives ABI packaging for the runtime
-// that Phase 2 will use — configuring it later would change how the APK
-// is built, which we want pinned from the start.
 chaquopy {
     defaultConfig {
         version = "3.11"
@@ -73,8 +65,11 @@ dependencies {
     implementation("androidx.drawerlayout:drawerlayout:1.2.0")
     implementation("androidx.recyclerview:recyclerview:1.3.2")
 
-    // Code editor core + TextMate-based syntax highlighting.
+    // language-textmate removed: five consecutive runtime failures in its
+    // grammar-registry bootstrap (undocumented, version-drifted API) with
+    // no net progress. Keeping only the core `editor` module, whose public
+    // surface (CodeEditor, Content, Cursor, undo/redo, commitText) has
+    // been reliable in every build since Phase 1 started.
     implementation(platform("io.github.Rosemoe.sora-editor:bom:0.23.6"))
     implementation("io.github.Rosemoe.sora-editor:editor")
-    implementation("io.github.Rosemoe.sora-editor:language-textmate")
 }

@@ -6,16 +6,16 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.PopupWindow
+import android.widget.SeekBar
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.pyedit.app.databinding.ActivityMainBinding
+import com.pyedit.app.databinding.DialogEditorSettingsBinding
 import com.pyedit.app.databinding.PopupMenuBinding
 import io.github.rosemoe.sora.widget.CodeEditor
-import io.github.rosemoe.sora.widget.schemes.EditorColorScheme
 import java.io.PrintWriter
 import java.io.StringWriter
 
@@ -23,11 +23,14 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var editor: CodeEditor
+    private lateinit var editorSettings: EditorSettings
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        editorSettings = EditorSettings(this)
 
         sizeDrawerToScreenWidth()
         setupTopBar()
@@ -68,9 +71,61 @@ class MainActivity : AppCompatActivity() {
         popupBinding.menuItemReplace.setOnClickListener(dismissOnly)
         popupBinding.menuItemGoToLine.setOnClickListener(dismissOnly)
         popupBinding.menuItemCompile.setOnClickListener(dismissOnly)
-        popupBinding.menuItemEditorSettings.setOnClickListener(dismissOnly)
+        popupBinding.menuItemEditorSettings.setOnClickListener {
+            popup.dismiss()
+            showEditorSettingsDialog()
+        }
 
         popup.showAsDropDown(anchor, 0, 8)
+    }
+
+    private fun showEditorSettingsDialog() {
+        val dialogBinding = DialogEditorSettingsBinding.inflate(layoutInflater)
+
+        dialogBinding.seekFontSize.progress = (editorSettings.fontSize - 10f).toInt()
+        dialogBinding.seekTabSize.progress = editorSettings.tabSize - 2
+
+        dialogBinding.seekFontSize.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                val newSize = (10 + progress).toFloat()
+                editorSettings.fontSize = newSize
+                applyFontSize(newSize)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        dialogBinding.seekTabSize.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                val newTabSize = 2 + progress
+                editorSettings.tabSize = newTabSize
+                applyTabSize(newTabSize)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        AlertDialog.Builder(this)
+            .setTitle("Editor Settings")
+            .setView(dialogBinding.root)
+            .setPositiveButton("Done", null)
+            .show()
+    }
+
+    private fun applyFontSize(size: Float) {
+        try {
+            editor.setTextSize(size)
+        } catch (t: Throwable) {
+            showCrashDiagnostic("Font size change failed", t)
+        }
+    }
+
+    private fun applyTabSize(size: Int) {
+        try {
+            editor.tabWidth = size
+        } catch (t: Throwable) {
+            showCrashDiagnostic("Tab size change failed", t)
+        }
     }
 
     private fun setupEditor() {
@@ -83,54 +138,29 @@ class MainActivity : AppCompatActivity() {
 
         editor.isWordwrap = false
 
-        // Safety net: apply our dark palette as the baseline FIRST, before
-        // attempting TextMate. This is what was missing last round — if
-        // TextMate throws, sora-editor's own default (light/white) scheme
-        // was left in place instead. Now a TextMate failure can only mean
-        // "no syntax colors", never "unreadable white editor".
-        applyFallbackColorScheme()
-
         try {
             PythonLanguage.attach(this, editor)
         } catch (t: Throwable) {
-            showCrashDiagnostic(t)
+            showCrashDiagnostic("Color scheme failed", t)
         }
+
+        try {
+            PythonEditingBehavior(editor).attach()
+        } catch (t: Throwable) {
+            showCrashDiagnostic("Smart editing setup failed", t)
+        }
+
+        applyFontSize(editorSettings.fontSize)
+        applyTabSize(editorSettings.tabSize)
     }
 
-    private fun applyFallbackColorScheme() {
-        val scheme = object : EditorColorScheme() {
-            init {
-                setColor(WHOLE_BACKGROUND, colorInt(R.color.editor_background))
-                setColor(LINE_NUMBER_BACKGROUND, colorInt(R.color.gutter_background))
-                setColor(LINE_NUMBER, colorInt(R.color.text_comment))
-                setColor(LINE_NUMBER_CURRENT, colorInt(R.color.mint_primary))
-                setColor(SELECTED_TEXT_BACKGROUND, colorInt(R.color.selection_overlay))
-                setColor(SELECTION_INSERT, colorInt(R.color.cursor_color))
-                setColor(TEXT_NORMAL, colorInt(R.color.text_normal))
-                setColor(COMMENT, colorInt(R.color.text_comment))
-                setColor(KEYWORD, colorInt(R.color.mint_primary))
-                setColor(LITERAL, colorInt(R.color.warning_color))
-            }
-        }
-        editor.colorScheme = scheme
-    }
-
-    private fun colorInt(resId: Int): Int = ContextCompat.getColor(this, resId)
-
-    private fun showCrashDiagnostic(t: Throwable) {
+    private fun showCrashDiagnostic(title: String, t: Throwable) {
         val sw = StringWriter()
         t.printStackTrace(PrintWriter(sw))
-        val fullTrace = sw.toString()
-
-        Toast.makeText(
-            this,
-            "Syntax highlighting failed to load — editor still works. Tap to see details.",
-            Toast.LENGTH_LONG
-        ).show()
-
+        Toast.makeText(this, "$title — editor still works. Tap to see details.", Toast.LENGTH_LONG).show()
         AlertDialog.Builder(this)
-            .setTitle("TextMate attach failed")
-            .setMessage(fullTrace)
+            .setTitle(title)
+            .setMessage(sw.toString())
             .setPositiveButton("OK", null)
             .show()
     }

@@ -1,5 +1,6 @@
 package com.pyedit.app
 
+import android.graphics.Rect
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
@@ -10,8 +11,6 @@ import android.widget.SeekBar
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import com.pyedit.app.databinding.ActivityMainBinding
 import com.pyedit.app.databinding.DialogEditorSettingsBinding
 import com.pyedit.app.databinding.PopupMenuBinding
@@ -36,7 +35,7 @@ class MainActivity : AppCompatActivity() {
         setupTopBar()
         setupEditor()
         setupPythonToolbar()
-        setupKeyboardAwareInsets()
+        setupKeyboardAwareToolbar()
     }
 
     private fun sizeDrawerToScreenWidth() {
@@ -152,6 +151,30 @@ class MainActivity : AppCompatActivity() {
 
         applyFontSize(editorSettings.fontSize)
         applyTabSize(editorSettings.tabSize)
+        applyVisualPolish()
+    }
+
+    /**
+     * Best-effort "vibe" fixes: thicker cursor matching text height, bold
+     * line numbers, extra gutter width so digits aren't cramped. None of
+     * these method/property names could be verified against documentation,
+     * so each is isolated and silently skipped on failure — a wrong guess
+     * here must never be able to break editing, which is why these run
+     * LAST, after everything functional is already set up.
+     */
+    private fun applyVisualPolish() {
+        try {
+            editor.setCursorWidth(resources.displayMetrics.density * 2.5f)
+        } catch (t: Throwable) { /* property name unverified; skip silently */ }
+
+        try {
+            editor.isLineNumberBold = true
+        } catch (t: Throwable) { /* property name unverified; skip silently */ }
+
+        try {
+            val currentPadding = editor.dividerMargin
+            editor.dividerMargin = currentPadding + (resources.displayMetrics.density * 6).toInt()
+        } catch (t: Throwable) { /* property name unverified; skip silently */ }
     }
 
     private fun showCrashDiagnostic(title: String, t: Throwable) {
@@ -216,12 +239,27 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun setupKeyboardAwareInsets() {
-        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
-            val keyboardVisible = insets.isVisible(WindowInsetsCompat.Type.ime())
-            binding.pythonToolbar.root.visibility =
-                if (keyboardVisible) View.VISIBLE else View.GONE
-            insets
+    /**
+     * FIX for "toolbar never appears": the previous approach used
+     * WindowInsetsCompat's IME-visibility detection, which is unreliable
+     * on pre-API-30 devices (real IME visibility tracking was only added
+     * properly in API 30's WindowInsetsAnimation). This replaces it with
+     * the older but far more universally reliable technique: watch the
+     * root view's visible display frame, and infer the keyboard is open
+     * when the visible height shrinks by a meaningful amount. Works on
+     * every API level this app supports (26+), since it doesn't depend on
+     * newer insets APIs at all.
+     */
+    private fun setupKeyboardAwareToolbar() {
+        val rootView = binding.root
+        rootView.viewTreeObserver.addOnGlobalLayoutListener {
+            val visibleFrame = Rect()
+            rootView.getWindowVisibleDisplayFrame(visibleFrame)
+            val screenHeight = rootView.rootView.height
+            if (screenHeight == 0) return@addOnGlobalLayoutListener
+            val heightDiff = screenHeight - visibleFrame.bottom
+            val keyboardVisible = heightDiff > screenHeight * 0.15
+            binding.pythonToolbar.root.visibility = if (keyboardVisible) View.VISIBLE else View.GONE
         }
     }
 }

@@ -12,14 +12,6 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
 
     private var isProgrammaticEdit = false
 
-    /**
-     * Tracks the most recent run of spaces WE inserted (via colon-triggered
-     * auto-indent, or the toolbar's Indent button) so backspace can treat
-     * it differently from spaces the user typed manually one keystroke at
-     * a time. "smart backspace = smart indentation" — only OUR insertions
-     * get the 4-at-a-time treatment; everything else is 1-at-a-time,
-     * matching how many keystrokes actually created it.
-     */
     private data class SmartRegion(val line: Int, var endColumn: Int, var remainingLevels: Int)
     private var smartRegion: SmartRegion? = null
 
@@ -37,11 +29,6 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
     ) {
         if (isProgrammaticEdit) return
 
-        // Toolbar's Indent button sends its whole "    " as one commitText
-        // call (one afterInsert event with length 4), whereas actual
-        // typing always arrives one character per event — so this
-        // reliably identifies toolbar-driven indentation, anywhere on a
-        // line, including after existing text.
         if (insertedContent.length == 4 && insertedContent.all { it == ' ' }) {
             markSmartRegion(endLine, endColumn - 4, endColumn, 1)
             return
@@ -67,6 +54,14 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
 
         if (ch == '\n') {
             val capturedLineIndex = endLine
+            // FIX for nested indentation: something in the editor's own
+            // default Enter-handling appears to race with our correction
+            // depending on nesting depth. Running the same idempotent
+            // correction both right away AND one frame later (post{})
+            // means whichever ordering is actually happening, the final
+            // state is always correct — the second call is a no-op
+            // whenever the first one already succeeded.
+            normalizeIndentForNewLine(content, capturedLineIndex)
             editor.post {
                 normalizeIndentForNewLine(content, capturedLineIndex)
             }
@@ -112,12 +107,6 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
         }
     }
 
-    /**
-     * Registers (or extends) the tracked smart-indent region. Extending
-     * matters for e.g. three consecutive toolbar Indent taps — each one
-     * should count as its own removable level on backspace, not get
-     * collapsed into "one big block" or lost after the first press.
-     */
     private fun markSmartRegion(line: Int, insertionStart: Int, newEnd: Int, levelsAdded: Int) {
         val existing = smartRegion
         if (existing != null && existing.line == line && existing.endColumn == insertionStart) {
@@ -143,10 +132,6 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
         if (isProgrammaticEdit) return
         val deletedText = deletedContent.toString()
 
-        // Cross-line delete: keyboard merged an indentation-only line
-        // into the previous one in a single backspace. Split that back
-        // apart so the first backspace only cancels the indentation,
-        // the second one actually merges the lines.
         if (startLine != endLine) {
             if (deletedText.length <= 1) return
             if (deletedText[0] != '\n') return
@@ -166,8 +151,6 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
             region.endColumn == startColumn + deletedText.length
 
         if (regionMatches) {
-            // Normalize to "exactly one 4-space level removed", regardless
-            // of how many characters the keyboard's own event removed.
             val desiredNewEnd = region!!.endColumn - 4
             val actualNewEnd = startColumn
             val diff = desiredNewEnd - actualNewEnd
@@ -180,12 +163,6 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
             return
         }
 
-        // Not a tracked smart region — only step in for genuinely manual
-        // leading whitespace (nothing but spaces before the cursor), and
-        // only to normalize to "exactly one space removed", matching the
-        // number of keystrokes the user actually made. Whitespace with
-        // real text before it on the line is left completely alone —
-        // that was already behaving correctly.
         val lineText = content.getLineString(startLine)
         val isLeading = lineText.substring(0, startColumn).all { it == ' ' }
         if (!isLeading) return

@@ -155,26 +155,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Best-effort "vibe" fixes: thicker cursor matching text height, bold
-     * line numbers, extra gutter width so digits aren't cramped. None of
-     * these method/property names could be verified against documentation,
-     * so each is isolated and silently skipped on failure — a wrong guess
-     * here must never be able to break editing, which is why these run
-     * LAST, after everything functional is already set up.
+     * Only setCursorWidth is kept here — it's the one visual-polish call
+     * from the last batch that actually compiled (confirmed by its
+     * absence from the last error log). isLineNumberBold and
+     * dividerMargin do not exist on this version's CodeEditor at all —
+     * try/catch can't save a compile-time "unresolved reference", only
+     * runtime failures, so those two are removed rather than guessed
+     * again. Bold line numbers and gutter width are parked as open items,
+     * not silently dropped.
      */
     private fun applyVisualPolish() {
         try {
             editor.setCursorWidth(resources.displayMetrics.density * 2.5f)
-        } catch (t: Throwable) { /* property name unverified; skip silently */ }
-
-        try {
-            editor.isLineNumberBold = true
-        } catch (t: Throwable) { /* property name unverified; skip silently */ }
-
-        try {
-            val currentPadding = editor.dividerMargin
-            editor.dividerMargin = currentPadding + (resources.displayMetrics.density * 6).toInt()
-        } catch (t: Throwable) { /* property name unverified; skip silently */ }
+        } catch (t: Throwable) { /* defensive only; this call is confirmed to compile */ }
     }
 
     private fun showCrashDiagnostic(title: String, t: Throwable) {
@@ -239,17 +232,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * FIX for "toolbar never appears": the previous approach used
-     * WindowInsetsCompat's IME-visibility detection, which is unreliable
-     * on pre-API-30 devices (real IME visibility tracking was only added
-     * properly in API 30's WindowInsetsAnimation). This replaces it with
-     * the older but far more universally reliable technique: watch the
-     * root view's visible display frame, and infer the keyboard is open
-     * when the visible height shrinks by a meaningful amount. Works on
-     * every API level this app supports (26+), since it doesn't depend on
-     * newer insets APIs at all.
-     */
     private fun setupKeyboardAwareToolbar() {
         val rootView = binding.root
         rootView.viewTreeObserver.addOnGlobalLayoutListener {

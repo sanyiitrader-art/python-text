@@ -34,6 +34,25 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
             return
         }
 
+        // FIX: previously only ran the newline/colon logic when exactly
+        // ONE character was inserted. But when the previous line already
+        // has indentation, the editor's own built-in "copy previous
+        // line's indent" behavior appears to bundle that copied
+        // whitespace together with the newline as ONE insert event
+        // (e.g. "\n    ", length 5+) rather than as a separate step —
+        // which meant our colon-aware correction never ran at all for
+        // any line that already had indentation. Checking for a newline
+        // ANYWHERE in the inserted text, regardless of what else is
+        // bundled with it, is what makes nested indentation actually run.
+        if (insertedContent.contains('\n')) {
+            val capturedLineIndex = endLine
+            normalizeIndentForNewLine(content, capturedLineIndex)
+            editor.post {
+                normalizeIndentForNewLine(content, capturedLineIndex)
+            }
+            return
+        }
+
         if (insertedContent.length != 1) return
         val ch = insertedContent[0]
 
@@ -50,21 +69,6 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
             try {
                 editor.setSelection(endLine, endColumn)
             } catch (t: Throwable) { /* best-effort cursor placement */ }
-        }
-
-        if (ch == '\n') {
-            val capturedLineIndex = endLine
-            // FIX for nested indentation: something in the editor's own
-            // default Enter-handling appears to race with our correction
-            // depending on nesting depth. Running the same idempotent
-            // correction both right away AND one frame later (post{})
-            // means whichever ordering is actually happening, the final
-            // state is always correct — the second call is a no-op
-            // whenever the first one already succeeded.
-            normalizeIndentForNewLine(content, capturedLineIndex)
-            editor.post {
-                normalizeIndentForNewLine(content, capturedLineIndex)
-            }
         }
     }
 

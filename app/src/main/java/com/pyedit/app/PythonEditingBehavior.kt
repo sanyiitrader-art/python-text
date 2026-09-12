@@ -1,6 +1,5 @@
 package com.pyedit.app
 
-import android.widget.Toast
 import io.github.rosemoe.sora.text.Content
 import io.github.rosemoe.sora.text.ContentListener
 import io.github.rosemoe.sora.widget.CodeEditor
@@ -15,9 +14,6 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
 
     private data class SmartRegion(val line: Int, var endColumn: Int, var remainingLevels: Int)
     private var smartRegion: SmartRegion? = null
-
-    private var lastBackspaceAdjustTimeMs = 0L
-    private val backspaceBurstWindowMs = 150L
 
     fun attach() {
         editor.text.addContentListener(this)
@@ -130,11 +126,40 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
         if (isProgrammaticEdit) return
         val deletedText = deletedContent.toString()
 
+        // A line containing ONLY whitespace, when backspaced, is merged
+        // into the previous line by the keyboard in one event that spans
+        // both lines — this is the actual path every case in your report
+        // goes through (since there's no other text on those lines to
+        // "stop" a same-line delete at). The old version of this branch
+        // just wiped the entire whitespace run in one go; now it removes
+        // exactly one level (or one manual space) and keeps re-splitting
+        // the line apart until nothing but a bare newline is left, at
+        // which point a further backspace is finally allowed to merge —
+        // giving the same "one press, one level" behavior as same-line.
         if (startLine != endLine) {
             if (deletedText.length <= 1) return
             if (deletedText[0] != '\n') return
-            if (deletedText.drop(1).any { it != ' ' }) return
-            programmaticInsert(content, startLine, startColumn, "\n")
+            val wsAfterNewline = deletedText.drop(1)
+            if (wsAfterNewline.any { it != ' ' }) return
+            if (wsAfterNewline.isEmpty()) return // truly empty line — let the real merge happen
+
+            val region = smartRegion
+            val isTrackedRegion = region != null &&
+                region.line == endLine &&
+                region.endColumn == wsAfterNewline.length
+            val stepSize = if (isTrackedRegion) 4 else 1
+            val remaining = maxOf(0, wsAfterNewline.length - stepSize)
+
+            programmaticInsert(content, startLine, startColumn, "\n" + " ".repeat(remaining))
+            try {
+                editor.setSelection(startLine + 1, remaining)
+            } catch (t: Throwable) { /* best-effort cursor placement */ }
+
+            if (isTrackedRegion) {
+                region!!.remainingLevels -= 1
+                region.endColumn = remaining
+                if (region.remainingLevels <= 0) smartRegion = null
+            }
             return
         }
 
@@ -143,31 +168,12 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
             return
         }
 
-        // TEMPORARY DIAGNOSTIC: shows exactly what this delete event
-        // actually contains. Two blind fixes for the "cancels everything
-        // at once" bug haven't worked, so rather than guess a third time,
-        // this tells us the real parameter values so the next fix is
-        // based on fact. Remove once the real fix lands.
         val region = smartRegion
-        Toast.makeText(
-            editor.context,
-            "DEBUG delete: startCol=$startColumn endCol=$endColumn len=${deletedText.length} " +
-                "regionEndCol=${region?.endColumn} regionLevels=${region?.remainingLevels}",
-            Toast.LENGTH_LONG
-        ).show()
-
         val regionMatches = region != null &&
             region.line == startLine &&
             region.endColumn == startColumn + deletedText.length
 
         if (regionMatches) {
-            val now = System.currentTimeMillis()
-            if (now - lastBackspaceAdjustTimeMs < backspaceBurstWindowMs) {
-                programmaticInsert(content, startLine, startColumn, deletedText)
-                return
-            }
-            lastBackspaceAdjustTimeMs = now
-
             val desiredNewEnd = region!!.endColumn - 4
             val actualNewEnd = startColumn
             val diff = desiredNewEnd - actualNewEnd
@@ -183,13 +189,6 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
         val lineText = content.getLineString(startLine)
         val isLeading = lineText.substring(0, startColumn).all { it == ' ' }
         if (!isLeading) return
-
-        val now = System.currentTimeMillis()
-        if (now - lastBackspaceAdjustTimeMs < backspaceBurstWindowMs) {
-            programmaticInsert(content, startLine, startColumn, deletedText)
-            return
-        }
-        lastBackspaceAdjustTimeMs = now
 
         val originalLength = startColumn + deletedText.length
         val desiredRemaining = maxOf(0, originalLength - 1)

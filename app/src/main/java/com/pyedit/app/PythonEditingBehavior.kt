@@ -1,5 +1,6 @@
 package com.pyedit.app
 
+import android.widget.Toast
 import io.github.rosemoe.sora.text.Content
 import io.github.rosemoe.sora.text.ContentListener
 import io.github.rosemoe.sora.widget.CodeEditor
@@ -15,11 +16,6 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
     private data class SmartRegion(val line: Int, var endColumn: Int, var remainingLevels: Int)
     private var smartRegion: SmartRegion? = null
 
-    // Debounce for backspace bursts: the keyboard's own "smart delete" for
-    // a run of spaces appears to issue several separate delete() calls in
-    // rapid succession for a SINGLE physical backspace press, not one call.
-    // Without coalescing these, each call was independently removing one
-    // indent level, so one press was cancelling multiple levels at once.
     private var lastBackspaceAdjustTimeMs = 0L
     private val backspaceBurstWindowMs = 150L
 
@@ -147,7 +143,19 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
             return
         }
 
+        // TEMPORARY DIAGNOSTIC: shows exactly what this delete event
+        // actually contains. Two blind fixes for the "cancels everything
+        // at once" bug haven't worked, so rather than guess a third time,
+        // this tells us the real parameter values so the next fix is
+        // based on fact. Remove once the real fix lands.
         val region = smartRegion
+        Toast.makeText(
+            editor.context,
+            "DEBUG delete: startCol=$startColumn endCol=$endColumn len=${deletedText.length} " +
+                "regionEndCol=${region?.endColumn} regionLevels=${region?.remainingLevels}",
+            Toast.LENGTH_LONG
+        ).show()
+
         val regionMatches = region != null &&
             region.line == startLine &&
             region.endColumn == startColumn + deletedText.length
@@ -155,9 +163,6 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
         if (regionMatches) {
             val now = System.currentTimeMillis()
             if (now - lastBackspaceAdjustTimeMs < backspaceBurstWindowMs) {
-                // Part of the same physical backspace press as the last
-                // event we processed — fully undo this chunk instead of
-                // removing another level on top of it.
                 programmaticInsert(content, startLine, startColumn, deletedText)
                 return
             }

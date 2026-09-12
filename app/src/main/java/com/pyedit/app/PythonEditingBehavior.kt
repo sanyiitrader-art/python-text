@@ -12,7 +12,14 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
 
     private var isProgrammaticEdit = false
 
-    private data class SmartRegion(val line: Int, var endColumn: Int, var remainingLevels: Int)
+    // FIX: previously tracked a countdown ("remainingLevels") that got
+    // exhausted after one correction, forgetting the rest of that line's
+    // smart-indented whitespace was still smart. Now this just remembers
+    // "this line's leading whitespace, up to this length, is smart" —
+    // it persists across as many backspaces as needed until the line's
+    // indentation reaches zero, whether it was built by one Enter, several
+    // nested ones, or toolbar taps.
+    private data class SmartRegion(val line: Int, var endColumn: Int)
     private var smartRegion: SmartRegion? = null
 
     fun attach() {
@@ -30,7 +37,7 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
         if (isProgrammaticEdit) return
 
         if (insertedContent.length == 4 && insertedContent.all { it == ' ' }) {
-            markSmartRegion(endLine, endColumn - 4, endColumn, 1)
+            markSmartRegion(endLine, endColumn)
             return
         }
 
@@ -81,7 +88,6 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
         val currentLeading = currentLineText.takeWhile { it == ' ' }
 
         if (currentLeading != targetIndent) {
-            val wasAdding = targetIndent.length > currentLeading.length
             if (currentLeading.isNotEmpty()) {
                 programmaticDelete(content, newLineIndex, 0, currentLeading.length)
             }
@@ -92,22 +98,22 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
                 editor.setSelection(newLineIndex, targetIndent.length)
             } catch (t: Throwable) { /* best-effort cursor placement */ }
 
-            if (wasAdding) {
-                val levels = maxOf(1, (targetIndent.length - currentLeading.length) / 4)
-                markSmartRegion(newLineIndex, currentLeading.length, targetIndent.length, levels)
+            // Whole resulting indentation on this line is smart now,
+            // regardless of what portion was added just this keystroke.
+            if (targetIndent.isNotEmpty()) {
+                markSmartRegion(newLineIndex, targetIndent.length)
             } else if (smartRegion?.line == newLineIndex) {
                 smartRegion = null
             }
         }
     }
 
-    private fun markSmartRegion(line: Int, insertionStart: Int, newEnd: Int, levelsAdded: Int) {
+    private fun markSmartRegion(line: Int, endColumn: Int) {
         val existing = smartRegion
-        if (existing != null && existing.line == line && existing.endColumn == insertionStart) {
-            existing.endColumn = newEnd
-            existing.remainingLevels += levelsAdded
+        if (existing != null && existing.line == line) {
+            existing.endColumn = endColumn
         } else {
-            smartRegion = SmartRegion(line, newEnd, levelsAdded)
+            smartRegion = SmartRegion(line, endColumn)
         }
     }
 
@@ -126,22 +132,12 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
         if (isProgrammaticEdit) return
         val deletedText = deletedContent.toString()
 
-        // A line containing ONLY whitespace, when backspaced, is merged
-        // into the previous line by the keyboard in one event that spans
-        // both lines — this is the actual path every case in your report
-        // goes through (since there's no other text on those lines to
-        // "stop" a same-line delete at). The old version of this branch
-        // just wiped the entire whitespace run in one go; now it removes
-        // exactly one level (or one manual space) and keeps re-splitting
-        // the line apart until nothing but a bare newline is left, at
-        // which point a further backspace is finally allowed to merge —
-        // giving the same "one press, one level" behavior as same-line.
         if (startLine != endLine) {
             if (deletedText.length <= 1) return
             if (deletedText[0] != '\n') return
             val wsAfterNewline = deletedText.drop(1)
             if (wsAfterNewline.any { it != ' ' }) return
-            if (wsAfterNewline.isEmpty()) return // truly empty line — let the real merge happen
+            if (wsAfterNewline.isEmpty()) return
 
             val region = smartRegion
             val isTrackedRegion = region != null &&
@@ -156,9 +152,8 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
             } catch (t: Throwable) { /* best-effort cursor placement */ }
 
             if (isTrackedRegion) {
-                region!!.remainingLevels -= 1
-                region.endColumn = remaining
-                if (region.remainingLevels <= 0) smartRegion = null
+                if (remaining <= 0) smartRegion = null
+                else region!!.endColumn = remaining
             }
             return
         }
@@ -174,15 +169,14 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
             region.endColumn == startColumn + deletedText.length
 
         if (regionMatches) {
-            val desiredNewEnd = region!!.endColumn - 4
+            val desiredNewEnd = maxOf(0, region!!.endColumn - 4)
             val actualNewEnd = startColumn
             val diff = desiredNewEnd - actualNewEnd
             if (diff > 0) programmaticInsert(content, startLine, startColumn, " ".repeat(diff))
             else if (diff < 0) programmaticDelete(content, startLine, desiredNewEnd, actualNewEnd)
 
-            region.remainingLevels -= 1
-            region.endColumn = maxOf(desiredNewEnd, 0)
-            if (region.remainingLevels <= 0) smartRegion = null
+            if (desiredNewEnd <= 0) smartRegion = null
+            else region.endColumn = desiredNewEnd
             return
         }
 

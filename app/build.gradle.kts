@@ -65,11 +65,12 @@ dependencies {
     implementation("androidx.drawerlayout:drawerlayout:1.2.0")
     implementation("androidx.recyclerview:recyclerview:1.3.2")
 
-    // language-textmate removed: five consecutive runtime failures in its
-    // grammar-registry bootstrap (undocumented, version-drifted API) with
-    // no net progress. Keeping only the core `editor` module, whose public
-    // surface (CodeEditor, Content, Cursor, undo/redo, commitText) has
-    // been reliable in every build since Phase 1 started.
-    implementation(platform("io.github.Rosemoe.sora-editor:bom:0.23.6"))
-    implementation("io.github.Rosemoe.sora-editor:editor")
+    // Upgraded from 0.23.6 to 0.24.6 specifically for a documented fix:
+    // "fix a problem in line width re-calculating when wordwrap is
+    // disabled" (0.24.3 changelog) — matches our exact horizontal-scroll
+    // gutter bug. Note the Maven group changed at 0.23.7:
+    // io.github.Rosemoe.sora-editor -> io.github.rosemoe, and the BOM
+    // module was renamed bom -> editor-bom.
+    implementation(platform("io.github.rosemoe:editor-bom:0.24.6"))
+    implementation("io.github.rosemoe:editor")
 }

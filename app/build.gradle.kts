@@ -6,12 +6,12 @@ plugins {
 
 android {
     namespace = "com.pyedit.app"
-    compileSdk = 35
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "com.pyedit.app"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 34
         versionCode = 1
         versionName = "1.0"
 
@@ -65,6 +65,10 @@ dependencies {
     implementation("androidx.drawerlayout:drawerlayout:1.2.0")
     implementation("androidx.recyclerview:recyclerview:1.3.2")
 
-    implementation(platform("io.github.rosemoe:editor-bom:0.24.6"))
+    // 0.24.6 requires compileSdk 36+ (beyond what our pinned AGP 8.7.3
+    // supports). 0.24.3 already contains the specific fix we're after
+    // ("fix a problem in line width re-calculating when wordwrap is
+    // disabled") without that newer SDK requirement.
+    implementation(platform("io.github.rosemoe:editor-bom:0.24.3"))
     implementation("io.github.rosemoe:editor")
 }

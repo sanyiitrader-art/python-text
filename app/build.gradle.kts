@@ -6,12 +6,12 @@ plugins {
 
 android {
     namespace = "com.pyedit.app"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.pyedit.app"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 
@@ -65,12 +65,6 @@ dependencies {
     implementation("androidx.drawerlayout:drawerlayout:1.2.0")
     implementation("androidx.recyclerview:recyclerview:1.3.2")
 
-    // Upgraded from 0.23.6 to 0.24.6 specifically for a documented fix:
-    // "fix a problem in line width re-calculating when wordwrap is
-    // disabled" (0.24.3 changelog) — matches our exact horizontal-scroll
-    // gutter bug. Note the Maven group changed at 0.23.7:
-    // io.github.Rosemoe.sora-editor -> io.github.rosemoe, and the BOM
-    // module was renamed bom -> editor-bom.
     implementation(platform("io.github.rosemoe:editor-bom:0.24.6"))
     implementation("io.github.rosemoe:editor")
 }

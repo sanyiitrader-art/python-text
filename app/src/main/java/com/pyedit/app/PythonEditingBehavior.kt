@@ -15,6 +15,14 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
     private data class SmartRegion(val line: Int, var endColumn: Int, var remainingLevels: Int)
     private var smartRegion: SmartRegion? = null
 
+    // Debounce for backspace bursts: the keyboard's own "smart delete" for
+    // a run of spaces appears to issue several separate delete() calls in
+    // rapid succession for a SINGLE physical backspace press, not one call.
+    // Without coalescing these, each call was independently removing one
+    // indent level, so one press was cancelling multiple levels at once.
+    private var lastBackspaceAdjustTimeMs = 0L
+    private val backspaceBurstWindowMs = 150L
+
     fun attach() {
         editor.text.addContentListener(this)
     }
@@ -34,16 +42,6 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
             return
         }
 
-        // FIX: previously only ran the newline/colon logic when exactly
-        // ONE character was inserted. But when the previous line already
-        // has indentation, the editor's own built-in "copy previous
-        // line's indent" behavior appears to bundle that copied
-        // whitespace together with the newline as ONE insert event
-        // (e.g. "\n    ", length 5+) rather than as a separate step —
-        // which meant our colon-aware correction never ran at all for
-        // any line that already had indentation. Checking for a newline
-        // ANYWHERE in the inserted text, regardless of what else is
-        // bundled with it, is what makes nested indentation actually run.
         if (insertedContent.contains('\n')) {
             val capturedLineIndex = endLine
             normalizeIndentForNewLine(content, capturedLineIndex)
@@ -155,6 +153,16 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
             region.endColumn == startColumn + deletedText.length
 
         if (regionMatches) {
+            val now = System.currentTimeMillis()
+            if (now - lastBackspaceAdjustTimeMs < backspaceBurstWindowMs) {
+                // Part of the same physical backspace press as the last
+                // event we processed — fully undo this chunk instead of
+                // removing another level on top of it.
+                programmaticInsert(content, startLine, startColumn, deletedText)
+                return
+            }
+            lastBackspaceAdjustTimeMs = now
+
             val desiredNewEnd = region!!.endColumn - 4
             val actualNewEnd = startColumn
             val diff = desiredNewEnd - actualNewEnd
@@ -170,6 +178,13 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
         val lineText = content.getLineString(startLine)
         val isLeading = lineText.substring(0, startColumn).all { it == ' ' }
         if (!isLeading) return
+
+        val now = System.currentTimeMillis()
+        if (now - lastBackspaceAdjustTimeMs < backspaceBurstWindowMs) {
+            programmaticInsert(content, startLine, startColumn, deletedText)
+            return
+        }
+        lastBackspaceAdjustTimeMs = now
 
         val originalLength = startColumn + deletedText.length
         val desiredRemaining = maxOf(0, originalLength - 1)

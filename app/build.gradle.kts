@@ -65,10 +65,12 @@ dependencies {
     implementation("androidx.drawerlayout:drawerlayout:1.2.0")
     implementation("androidx.recyclerview:recyclerview:1.3.2")
 
-    // 0.24.6 requires compileSdk 36+ (beyond what our pinned AGP 8.7.3
-    // supports). 0.24.3 already contains the specific fix we're after
-    // ("fix a problem in line width re-calculating when wordwrap is
-    // disabled") without that newer SDK requirement.
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    // Needed for the `lifecycleScope` coroutine builder used to read/write
+    // DataStore off the raw callback style.
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
+
     implementation(platform("io.github.rosemoe:editor-bom:0.24.3"))
     implementation("io.github.rosemoe:editor")
 }

@@ -1,11 +1,11 @@
 package com.pyedit.app
 
 import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
 import com.pyedit.app.databinding.ItemFileNodeBinding
 
-/** Updated for DocumentFile (SAF) instead of java.io.File. */
 class FileTreeAdapter(
     private val onFileClick: (WorkspaceManager.FileNode.Leaf) -> Unit
 ) : RecyclerView.Adapter<FileTreeAdapter.ViewHolder>() {
@@ -53,10 +53,12 @@ class FileTreeAdapter(
 
         when (val node = row.node) {
             is WorkspaceManager.FileNode.Folder -> {
+                // Folders keep the text arrow indicator, no icon —
                 val key = node.doc.uri.toString()
                 val collapsed = key in collapsedKeys
                 val arrow = if (collapsed) ">" else "\u2228"
                 holder.binding.tvNodeName.text = "$arrow ${node.name}"
+                holder.binding.ivNodeIcon.visibility = View.GONE
                 holder.binding.root.setOnClickListener {
                     if (collapsed) collapsedKeys.remove(key) else collapsedKeys.add(key)
                     recomputeRows()
@@ -64,6 +66,7 @@ class FileTreeAdapter(
             }
             is WorkspaceManager.FileNode.Leaf -> {
                 holder.binding.tvNodeName.text = node.name
+                holder.binding.ivNodeIcon.visibility = View.VISIBLE
                 holder.binding.root.setOnClickListener { onFileClick(node) }
             }
         }

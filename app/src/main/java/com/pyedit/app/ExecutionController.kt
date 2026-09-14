@@ -11,25 +11,14 @@ import android.os.Messenger
 import android.os.Process
 import java.io.File
 
-/**
- * Client-side (UI process) half of execution. Binds to
- * PythonExecutionService in :pyexec, sends the script to run, and
- * forwards stdout/stderr/exit callbacks back to the caller.
- *
- * The current file's content is always copied to a temp .py file in
- * app-private cache storage before running — NOT executed directly from
- * its original SAF content:// location. This sidesteps a real problem:
- * an arbitrary picked folder/file may come from a storage provider with
- * no plain filesystem path at all, or one the separate :pyexec process
- * can't access without its own URI permission grant. A cache-local plain
- * file path always works regardless of where the source file lives.
- */
 class ExecutionController(private val context: Context) {
 
     interface Listener {
         fun onStdout(text: String)
         fun onStderr(text: String)
         fun onExited()
+        /** Python's input() is now actually blocked waiting for a line. */
+        fun onInputRequested()
     }
 
     private var serviceMessenger: Messenger? = null
@@ -44,6 +33,8 @@ class ExecutionController(private val context: Context) {
                 listener?.onStderr(msg.data.getString(ExecutionProtocol.KEY_TEXT) ?: "")
             ExecutionProtocol.MSG_EXITED ->
                 listener?.onExited()
+            ExecutionProtocol.MSG_INPUT_REQUESTED ->
+                listener?.onInputRequested()
         }
         true
     })
@@ -57,8 +48,6 @@ class ExecutionController(private val context: Context) {
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
-            // Happens after Stop kills the :pyexec process — expected,
-            // not an error. Clear state so the next Run rebinds cleanly.
             serviceMessenger = null
             bound = false
         }
@@ -93,13 +82,6 @@ class ExecutionController(private val context: Context) {
         serviceMessenger?.send(msg)
     }
 
-    /**
-     * Stop = kill the :pyexec process directly, rather than any graceful
-     * in-process message. This is what makes Stop instant and
-     * unconditional regardless of what the running script is doing
-     * (tight loop, blocked I/O, anything) — per the process-isolation
-     * architecture decided at the start of the project.
-     */
     fun stop() {
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         val targetProcessName = "${context.packageName}:pyexec"

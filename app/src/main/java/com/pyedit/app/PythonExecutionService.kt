@@ -12,33 +12,28 @@ import com.chaquo.python.android.AndroidPlatform
 import java.util.concurrent.LinkedBlockingQueue
 import kotlin.concurrent.thread
 
-/**
- * Runs in the :pyexec process (per manifest). Executes a script via
- * pyedit_runner.py, streaming stdout/stderr back to the UI process over
- * a Messenger, and reading stdin lines the same way. Stop is handled by
- * MainActivity killing this whole process directly (Process.killProcess
- * via ActivityManager on the client side) — not by anything in here —
- * which is what makes Stop instant and unconditional regardless of what
- * the running script is doing.
- */
 class PythonExecutionService : Service() {
 
     private var clientMessenger: Messenger? = null
     private val stdinQueue = LinkedBlockingQueue<String>()
 
-    /** Passed into Python as the stdout/stderr "writer" objects — Chaquopy
-     * exposes any public Kotlin method to Python automatically, so
-     * pyedit_runner.py can just call .write(s) on these. */
     inner class StreamEmitter(private val what: Int) {
         fun write(s: String) {
             sendToClient(what, s)
         }
     }
 
-    /** Passed into Python as the stdin "reader" — blocks the execution
-     * thread (NOT the service's main thread) until a line arrives. */
     inner class StdinReader {
-        fun readLine(): String = stdinQueue.take()
+        /**
+         * Notifies the client the instant input() actually blocks,
+         * BEFORE calling take() — so the UI only ever activates the
+         * input box when Python is genuinely waiting on it, never
+         * preemptively/speculatively.
+         */
+        fun readLine(): String {
+            sendToClient(ExecutionProtocol.MSG_INPUT_REQUESTED, "")
+            return stdinQueue.take()
+        }
     }
 
     private val incomingHandler = Handler(Looper.getMainLooper()) { msg ->

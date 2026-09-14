@@ -1,7 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Step 2 (basic, non-draggable) output panel. Fixed-position for now;
-     the drag/collapse/full-open gesture system is deliberately a later,
-     separate step per the plan. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -33,6 +30,8 @@
         android:background="@color/topbar_background"
         android:padding="6dp">
 
+        <!-- Starts disabled/dimmed (not enabled) — only activated by
+             MainActivity exactly when input() blocks. -->
         <EditText
             android:id="@+id/edit_stdin"
             android:layout_width="0dp"
@@ -44,7 +43,9 @@
             android:fontFamily="monospace"
             android:textSize="13sp"
             android:imeOptions="actionSend"
-            android:singleLine="true" />
+            android:singleLine="true"
+            android:enabled="false"
+            android:alpha="0.4" />
 
     </LinearLayout>
 

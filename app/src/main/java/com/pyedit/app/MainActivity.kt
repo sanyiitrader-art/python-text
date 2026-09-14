@@ -120,6 +120,7 @@ class MainActivity : AppCompatActivity() {
             executionController.stop()
             isRunning = false
             binding.btnRun.setImageResource(R.drawable.ic_run)
+            setStdinActive(false)
             appendOutput("\n[Stopped]\n")
         } else {
             val scriptText = editor.text.toString()
@@ -128,23 +129,53 @@ class MainActivity : AppCompatActivity() {
             binding.outputPanel.root.visibility = View.VISIBLE
             isRunning = true
             binding.btnRun.setImageResource(R.drawable.ic_stop)
-            appendOutput("$ python ${name}\n")
+            setStdinActive(false) // blocked until the script actually asks for input
+            appendHeaderLine("$ python $name\n")
 
             executionController.run(scriptText, name, object : ExecutionController.Listener {
                 override fun onStdout(text: String) = runOnUiThread { appendOutput(text) }
                 override fun onStderr(text: String) = runOnUiThread { appendOutput(text) }
+                override fun onInputRequested() = runOnUiThread { setStdinActive(true) }
                 override fun onExited() = runOnUiThread {
                     isRunning = false
                     binding.btnRun.setImageResource(R.drawable.ic_run)
+                    setStdinActive(false)
                 }
             })
         }
     }
 
-    private fun appendOutput(text: String) {
-        binding.outputPanel.tvOutputText.append(text)
+    /** Styles just the "$ python <file>" line distinctly from real program
+    * output: italic + mint color, via a SpannableString appended to the
+    * same TextView (append() preserves spans on a Spanned CharSequence). */
+    private fun appendHeaderLine(text: String) {
+        val spannable = android.text.SpannableString(text)
+        spannable.setSpan(
+            android.text.style.StyleSpan(android.graphics.Typeface.ITALIC),
+            0, text.length, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+        )
+        spannable.setSpan(
+            android.text.style.ForegroundColorSpan(getColor(R.color.mint_primary)),
+            0, text.length, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+        )
+        binding.outputPanel.tvOutputText.append(spannable)
         binding.outputPanel.outputScroll.post {
             binding.outputPanel.outputScroll.fullScroll(View.FOCUS_DOWN)
+        }
+    }
+
+    /** Only place that enables/focuses/shows-keyboard-for the input box —
+    * driven entirely by onInputRequested, never by the user tapping it. */
+    private fun setStdinActive(active: Boolean) {
+        val editStdin = binding.outputPanel.editStdin
+        editStdin.isEnabled = active
+        editStdin.alpha = if (active) 1f else 0.4f
+        if (active) {
+            editStdin.requestFocus()
+            val imm = getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+            imm.showSoftInput(editStdin, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+        } else {
+            editStdin.clearFocus()
         }
     }
 
@@ -155,6 +186,7 @@ class MainActivity : AppCompatActivity() {
                 appendOutput("$line\n")
                 executionController.sendStdinLine(line)
                 v.setText("")
+                setStdinActive(false) // re-block until the NEXT input() call
                 true
             } else {
                 false

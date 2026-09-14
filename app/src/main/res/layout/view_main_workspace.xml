@@ -4,7 +4,6 @@
     android:layout_height="match_parent"
     android:background="@color/editor_background">
 
-    <!-- Stage 1: nothing picked yet -->
     <LinearLayout
         android:id="@+id/group_empty_state"
         android:layout_width="match_parent"
@@ -25,33 +24,36 @@
             android:textSize="14sp"
             android:layout_marginBottom="20dp" />
 
+        <!-- Now vertical, and using a plain Button (no borderless style
+             override) so the mint text color actually shows against the
+             popup_bg background instead of blending into it. -->
         <LinearLayout
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal">
+            android:orientation="vertical">
 
             <Button
                 android:id="@+id/btn_open_folder"
-                style="?android:attr/borderlessButtonStyle"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="@string/open_folder"
                 android:textColor="@color/mint_primary"
-                android:layout_marginEnd="12dp"
+                android:textAllCaps="false"
                 android:background="@drawable/popup_bg"
-                android:paddingStart="20dp"
-                android:paddingEnd="20dp" />
+                android:paddingTop="12dp"
+                android:paddingBottom="12dp"
+                android:layout_marginBottom="10dp" />
 
             <Button
                 android:id="@+id/btn_open_file"
-                style="?android:attr/borderlessButtonStyle"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="@string/open_file"
                 android:textColor="@color/mint_primary"
+                android:textAllCaps="false"
                 android:background="@drawable/popup_bg"
-                android:paddingStart="20dp"
-                android:paddingEnd="20dp" />
+                android:paddingTop="12dp"
+                android:paddingBottom="12dp" />
 
         </LinearLayout>
 
@@ -73,7 +75,6 @@
 
     </LinearLayout>
 
-    <!-- Stage 2: a folder has been picked; browsing its .py files -->
     <LinearLayout
         android:id="@+id/group_folder_browse"
         android:layout_width="match_parent"

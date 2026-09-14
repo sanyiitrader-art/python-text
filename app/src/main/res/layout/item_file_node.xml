@@ -2,22 +2,36 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="horizontal"
-    android:background="?attr/selectableItemBackground"
-    android:gravity="center_vertical">
+    android:orientation="vertical">
 
-    <TextView
-        android:id="@+id/tv_node_name"
-        android:layout_width="0dp"
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_weight="1"
-        android:paddingStart="8dp"
-        android:paddingEnd="16dp"
-        android:paddingTop="10dp"
-        android:paddingBottom="10dp"
-        android:textColor="@color/text_normal"
-        android:textSize="14sp"
-        android:singleLine="true"
-        android:ellipsize="middle" />
+        android:orientation="horizontal"
+        android:background="?attr/selectableItemBackground"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/tv_node_name"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:paddingStart="8dp"
+            android:paddingEnd="16dp"
+            android:paddingTop="10dp"
+            android:paddingBottom="10dp"
+            android:textColor="@color/text_normal"
+            android:textSize="14sp"
+            android:singleLine="true"
+            android:ellipsize="middle" />
+
+    </LinearLayout>
+
+    <!-- Divider between rows so files/folders read as distinct list
+         items rather than one continuous block of text. -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/border_divider" />
 
 </LinearLayout>

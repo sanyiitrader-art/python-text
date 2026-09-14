@@ -88,8 +88,6 @@
             android:background="@color/border_divider"
             app:layout_constraintTop_toBottomOf="@id/top_bar" />
 
-        <!-- CodeEditor is added here in code, visible only once a file
-             is actually open. -->
         <FrameLayout
             android:id="@+id/editor_container"
             android:layout_width="match_parent"
@@ -100,7 +98,6 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent" />
 
-        <!-- Shown instead of the editor until a file is opened -->
         <include
             android:id="@+id/main_workspace_view"
             layout="@layout/view_main_workspace"
@@ -110,6 +107,21 @@
             app:layout_constraintBottom_toTopOf="@id/python_toolbar"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent" />
+
+        <!-- Step 2 basic output panel: fixed 30% height at the bottom,
+             overlaying the editor (declared after editor_container in
+             this file, so it draws on top). Drag/collapse/full-open
+             gestures are a later, separate step. -->
+        <include
+            android:id="@+id/output_panel"
+            layout="@layout/view_output_panel"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="gone"
+            app:layout_constraintBottom_toTopOf="@id/python_toolbar"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintHeight_percent="0.3" />
 
         <include
             android:id="@+id/python_toolbar"

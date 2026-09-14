@@ -22,6 +22,15 @@
             </intent-filter>
         </activity>
 
+        <!-- Runs Python execution in its own process (spec's process-
+             isolation requirement, §78/§81): Stop can then simply kill
+             this process outright, instantly, regardless of what the
+             running script is doing — no fragile in-process interruption. -->
+        <service
+            android:name=".PythonExecutionService"
+            android:process=":pyexec"
+            android:exported="false" />
+
     </application>
 
 </manifest>

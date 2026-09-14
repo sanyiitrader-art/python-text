@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -42,6 +43,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var mainBrowseAdapter: FileTreeAdapter
     private lateinit var recentFilesAdapter: RecentFilesAdapter
     private lateinit var mainRecentFilesAdapter: RecentFilesAdapter
+    private lateinit var executionController: ExecutionController
 
     private var pythonEditingBehavior: PythonEditingBehavior? = null
 
@@ -50,6 +52,7 @@ class MainActivity : AppCompatActivity() {
     private var isDirty: Boolean = false
     private var suppressDirtyTracking: Boolean = false
     private var hasFileOpen: Boolean = false
+    private var isRunning: Boolean = false
 
     private val autosaveHandler = Handler(Looper.getMainLooper())
     private var autosaveRunnable: Runnable? = null
@@ -72,6 +75,7 @@ class MainActivity : AppCompatActivity() {
         editorSettings = EditorSettings(this)
         workspace = WorkspaceManager(this)
         recentStore = RecentFilesStore(this)
+        executionController = ExecutionController(this)
 
         sizeDrawerToScreenWidth()
         setupTopBar()
@@ -80,12 +84,18 @@ class MainActivity : AppCompatActivity() {
         setupKeyboardAwareToolbar()
         setupDrawerLists()
         setupMainWorkspaceView()
+        setupOutputPanel()
         updateActionAvailability()
 
         lifecycleScope.launch {
             autosaveEnabled = recentStore.isAutosaveEnabled()
             restoreLastSessionOrDefault()
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        executionController.teardown()
     }
 
     private fun sizeDrawerToScreenWidth() {
@@ -101,6 +111,55 @@ class MainActivity : AppCompatActivity() {
             binding.drawerLayout.openDrawer(Gravity.START)
         }
         binding.btnMenu.setOnClickListener { anchor -> showThreeDotMenu(anchor) }
+        binding.btnRun.setOnClickListener { onRunStopClicked() }
+    }
+
+    private fun onRunStopClicked() {
+        if (!hasFileOpen) return
+        if (isRunning) {
+            executionController.stop()
+            isRunning = false
+            binding.btnRun.setImageResource(R.drawable.ic_run)
+            appendOutput("\n[Stopped]\n")
+        } else {
+            val scriptText = editor.text.toString()
+            val name = currentFileDoc?.name ?: "untitled.py"
+            binding.outputPanel.tvOutputText.text = ""
+            binding.outputPanel.root.visibility = View.VISIBLE
+            isRunning = true
+            binding.btnRun.setImageResource(R.drawable.ic_stop)
+            appendOutput("$ python ${name}\n")
+
+            executionController.run(scriptText, name, object : ExecutionController.Listener {
+                override fun onStdout(text: String) = runOnUiThread { appendOutput(text) }
+                override fun onStderr(text: String) = runOnUiThread { appendOutput(text) }
+                override fun onExited() = runOnUiThread {
+                    isRunning = false
+                    binding.btnRun.setImageResource(R.drawable.ic_run)
+                }
+            })
+        }
+    }
+
+    private fun appendOutput(text: String) {
+        binding.outputPanel.tvOutputText.append(text)
+        binding.outputPanel.outputScroll.post {
+            binding.outputPanel.outputScroll.fullScroll(View.FOCUS_DOWN)
+        }
+    }
+
+    private fun setupOutputPanel() {
+        binding.outputPanel.editStdin.setOnEditorActionListener { v, _, event ->
+            if (event == null || event.keyCode == KeyEvent.KEYCODE_ENTER) {
+                val line = v.text.toString()
+                appendOutput("$line\n")
+                executionController.sendStdinLine(line)
+                v.text.clear()
+                true
+            } else {
+                false
+            }
+        }
     }
 
     private fun showThreeDotMenu(anchor: View) {
@@ -211,15 +270,6 @@ class MainActivity : AppCompatActivity() {
         applyVisualPolish()
     }
 
-    /**
-     * FIX for the indentation regression: editor.setText() (used every
-     * time a file is loaded) creates a NEW Content object rather than
-     * mutating the existing one, which silently orphans any listener
-     * attached to the old Content. Both PythonEditingBehavior and dirty-
-     * tracking must be freshly (re-)attached after every load, not just
-     * once at startup — this is called both here and after every
-     * loadIntoEditor().
-     */
     private fun attachContentBehaviors() {
         try {
             val behavior = PythonEditingBehavior(editor)
@@ -270,15 +320,12 @@ class MainActivity : AppCompatActivity() {
         binding.tvFilename.text = if (isDirty) "$name *" else name
     }
 
-    /** Re-attaches listeners after setText, per the fix above. */
     private fun loadIntoEditor(content: String) {
         suppressDirtyTracking = true
         editor.setText(content)
         attachContentBehaviors()
         suppressDirtyTracking = false
     }
-
-    // --- Folder / file picking (SAF) --------------------------------------
 
     private fun onFolderPicked(uri: Uri) {
         contentResolver.takePersistableUriPermission(
@@ -353,8 +400,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // --- File open / save --------------------------------------------------
-
     private fun openFile(doc: DocumentFile) {
         checkUnsavedThenRun {
             val content = workspace.readFile(doc)
@@ -365,6 +410,7 @@ class MainActivity : AppCompatActivity() {
             updateFilenameDisplay()
             updateActionAvailability()
             showEditorState()
+            binding.outputPanel.root.visibility = View.GONE
             lifecycleScope.launch {
                 recentStore.addRecent(doc.uri.toString(), doc.name ?: "untitled.py")
                 recentStore.setLastActiveFile(doc.uri.toString())

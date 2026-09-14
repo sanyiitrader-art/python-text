@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Step 2 (basic, non-draggable) output panel. Fixed-position for now;
+     the drag/collapse/full-open gesture system is deliberately a later,
+     separate step per the plan. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/output_background">
+
+    <ScrollView
+        android:id="@+id/output_scroll"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:padding="8dp">
+
+        <TextView
+            android:id="@+id/tv_output_text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textColor="@color/text_normal"
+            android:textSize="13sp"
+            android:textIsSelectable="true" />
+
+    </ScrollView>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:background="@color/topbar_background"
+        android:padding="6dp">
+
+        <EditText
+            android:id="@+id/edit_stdin"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="Input..."
+            android:textColor="@color/text_normal"
+            android:textColorHint="@color/text_comment"
+            android:fontFamily="monospace"
+            android:textSize="13sp"
+            android:imeOptions="actionSend"
+            android:singleLine="true" />
+
+    </LinearLayout>
+
+</LinearLayout>

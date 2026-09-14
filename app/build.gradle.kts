@@ -64,12 +64,15 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.drawerlayout:drawerlayout:1.2.0")
     implementation("androidx.recyclerview:recyclerview:1.3.2")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
+
+    // New: Storage Access Framework tree/document browsing, for picking
+    // any folder or file on the device (spec's Option A) rather than
+    // browsing a fixed app-private folder.
+    implementation("androidx.documentfile:documentfile:1.0.1")
 
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-    // Needed for the `lifecycleScope` coroutine builder used to read/write
-    // DataStore off the raw callback style.
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
 
     implementation(platform("io.github.rosemoe:editor-bom:0.24.3"))
     implementation("io.github.rosemoe:editor")

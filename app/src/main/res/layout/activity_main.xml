@@ -88,9 +88,23 @@
             android:background="@color/border_divider"
             app:layout_constraintTop_toBottomOf="@id/top_bar" />
 
+        <!-- CodeEditor is added here in code, visible only once a file
+             is actually open. -->
         <FrameLayout
             android:id="@+id/editor_container"
             android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:visibility="gone"
+            app:layout_constraintTop_toBottomOf="@id/top_bar_divider"
+            app:layout_constraintBottom_toTopOf="@id/python_toolbar"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <!-- Shown instead of the editor until a file is opened -->
+        <include
+            android:id="@+id/main_workspace_view"
+            layout="@layout/view_main_workspace"
+            android:layout_width="0dp"
             android:layout_height="0dp"
             app:layout_constraintTop_toBottomOf="@id/top_bar_divider"
             app:layout_constraintBottom_toTopOf="@id/python_toolbar"

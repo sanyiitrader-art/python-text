@@ -25,4 +25,9 @@
     <string name="menu_editor_settings">Editor Settings</string>
 
     <string name="untitled_file">untitled.py</string>
+
+    <string name="nothing_to_open">We have nothing to open</string>
+    <string name="open_folder">Open Folder</string>
+    <string name="open_file">Open File</string>
+    <string name="no_python_files">There is no python file inside this folder</string>
 </resources>

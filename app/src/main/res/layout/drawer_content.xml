@@ -1,79 +1,131 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:background="@color/popup_background">
 
-    <!-- Recent section (spec §18) -->
+    <!-- New persistent gutter bar at the very top of the drawer, with a
+         disabled "+" (add file) button reserved for a future feature. -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="44dp"
         android:orientation="horizontal"
-        android:paddingStart="16dp"
-        android:paddingEnd="16dp"
-        android:paddingTop="20dp"
-        android:paddingBottom="12dp"
-        android:gravity="center_vertical">
+        android:background="@color/topbar_background"
+        android:gravity="center_vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="4dp">
 
-        <TextView
-            android:id="@+id/tv_recent_header"
+        <View
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/drawer_recent"
-            android:textStyle="bold"
-            android:textColor="@color/text_normal"
-            android:textSize="15sp" />
+            android:layout_height="1dp"
+            android:layout_weight="1" />
 
-        <TextView
-            android:id="@+id/tv_clear_recent"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/drawer_clear"
-            android:textStyle="bold"
-            android:textColor="@color/error_color"
-            android:textSize="14sp"
-            android:padding="4dp"
-            android:background="?attr/selectableItemBackground" />
+        <ImageButton
+            android:id="@+id/btn_drawer_add"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:src="@drawable/ic_add"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:enabled="false"
+            android:alpha="0.35"
+            app:tint="@color/text_normal"
+            android:contentDescription="Add" />
 
     </LinearLayout>
 
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/rv_recent_files"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:maxHeight="200dp"
-        android:paddingStart="8dp"
-        android:paddingEnd="8dp" />
-
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:layout_marginTop="8dp"
-        android:background="@color/border_divider" />
-
-    <!-- Root Folder section (spec §19) — separate list, separate concept
-         from Recent. -->
-    <TextView
-        android:id="@+id/tv_root_folder_header"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="@string/drawer_root_folder"
-        android:textStyle="bold"
-        android:textColor="@color/text_normal"
-        android:textSize="15sp"
-        android:paddingStart="16dp"
-        android:paddingEnd="16dp"
-        android:paddingTop="16dp"
-        android:paddingBottom="8dp" />
-
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/rv_file_tree"
+    <!-- Everything below is pulled down slightly, separating it visually
+         from the new gutter bar above. -->
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:paddingStart="8dp"
-        android:paddingEnd="8dp" />
+        android:orientation="vertical"
+        android:paddingTop="12dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="12dp"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/tv_recent_header"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/drawer_recent"
+                android:textStyle="bold"
+                android:textColor="@color/text_normal"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/tv_clear_recent"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/drawer_clear"
+                android:textStyle="bold"
+                android:textColor="@color/error_color"
+                android:textSize="14sp"
+                android:padding="4dp"
+                android:background="?attr/selectableItemBackground" />
+
+        </LinearLayout>
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rv_recent_files"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:maxHeight="200dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="8dp"
+            android:background="@color/border_divider" />
+
+        <!-- Mirrors whatever folder is currently picked via the main
+             plate's Open Folder button — no separate picker here. -->
+        <TextView
+            android:id="@+id/tv_root_folder_header"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/drawer_root_folder"
+            android:textStyle="bold"
+            android:textColor="@color/text_normal"
+            android:textSize="15sp"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingTop="16dp"
+            android:paddingBottom="8dp" />
+
+        <TextView
+            android:id="@+id/tv_drawer_no_python_files"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/no_python_files"
+            android:textColor="@color/text_comment"
+            android:textStyle="italic"
+            android:alpha="0.7"
+            android:textSize="13sp"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:visibility="gone" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rv_file_tree"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp" />
+
+    </LinearLayout>
 
 </LinearLayout>

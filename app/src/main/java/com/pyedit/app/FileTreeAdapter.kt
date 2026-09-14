@@ -5,18 +5,15 @@ import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
 import com.pyedit.app.databinding.ItemFileNodeBinding
 
-/**
- * Flattens the Root Folder tree into a displayable list with indentation,
- * supporting collapse/expand per spec §19 ("> = collapsed, ∨ = expanded").
- */
+/** Updated for DocumentFile (SAF) instead of java.io.File. */
 class FileTreeAdapter(
-    private val onFileClick: (java.io.File) -> Unit
+    private val onFileClick: (WorkspaceManager.FileNode.Leaf) -> Unit
 ) : RecyclerView.Adapter<FileTreeAdapter.ViewHolder>() {
 
     private data class Row(val node: WorkspaceManager.FileNode, val depth: Int)
 
     private var rootNodes: List<WorkspaceManager.FileNode> = emptyList()
-    private val collapsedPaths = mutableSetOf<String>()
+    private val collapsedKeys = mutableSetOf<String>()
     private var flattenedRows: List<Row> = emptyList()
 
     fun submitTree(nodes: List<WorkspaceManager.FileNode>) {
@@ -30,7 +27,7 @@ class FileTreeAdapter(
             for (node in nodes) {
                 rows.add(Row(node, depth))
                 if (node is WorkspaceManager.FileNode.Folder &&
-                    node.file.absolutePath !in collapsedPaths
+                    node.doc.uri.toString() !in collapsedKeys
                 ) {
                     visit(node.children, depth + 1)
                 }
@@ -56,18 +53,18 @@ class FileTreeAdapter(
 
         when (val node = row.node) {
             is WorkspaceManager.FileNode.Folder -> {
-                val collapsed = node.file.absolutePath in collapsedPaths
-                val arrow = if (collapsed) ">" else "\u2228" // ">" or "∨"
+                val key = node.doc.uri.toString()
+                val collapsed = key in collapsedKeys
+                val arrow = if (collapsed) ">" else "\u2228"
                 holder.binding.tvNodeName.text = "$arrow ${node.name}"
                 holder.binding.root.setOnClickListener {
-                    if (collapsed) collapsedPaths.remove(node.file.absolutePath)
-                    else collapsedPaths.add(node.file.absolutePath)
+                    if (collapsed) collapsedKeys.remove(key) else collapsedKeys.add(key)
                     recomputeRows()
                 }
             }
             is WorkspaceManager.FileNode.Leaf -> {
                 holder.binding.tvNodeName.text = node.name
-                holder.binding.root.setOnClickListener { onFileClick(node.file) }
+                holder.binding.root.setOnClickListener { onFileClick(node) }
             }
         }
     }

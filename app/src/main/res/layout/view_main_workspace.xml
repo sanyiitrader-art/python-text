@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/editor_background">
+
+    <!-- Stage 1: nothing picked yet -->
+    <LinearLayout
+        android:id="@+id/group_empty_state"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:paddingTop="48dp"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/nothing_to_open"
+            android:textColor="@color/text_comment"
+            android:textStyle="italic"
+            android:alpha="0.7"
+            android:textSize="14sp"
+            android:layout_marginBottom="20dp" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btn_open_folder"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/open_folder"
+                android:textColor="@color/mint_primary"
+                android:layout_marginEnd="12dp"
+                android:background="@drawable/popup_bg"
+                android:paddingStart="20dp"
+                android:paddingEnd="20dp" />
+
+            <Button
+                android:id="@+id/btn_open_file"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/open_file"
+                android:textColor="@color/mint_primary"
+                android:background="@drawable/popup_bg"
+                android:paddingStart="20dp"
+                android:paddingEnd="20dp" />
+
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/drawer_recent"
+            android:textStyle="bold"
+            android:textColor="@color/text_normal"
+            android:textSize="15sp"
+            android:layout_marginTop="36dp"
+            android:layout_marginBottom="8dp" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rv_recent_files_main"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+    </LinearLayout>
+
+    <!-- Stage 2: a folder has been picked; browsing its .py files -->
+    <LinearLayout
+        android:id="@+id/group_folder_browse"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/tv_no_python_files_main"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/no_python_files"
+            android:textColor="@color/text_comment"
+            android:textStyle="italic"
+            android:alpha="0.7"
+            android:textSize="14sp"
+            android:gravity="center"
+            android:paddingTop="48dp"
+            android:visibility="gone" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rv_folder_browse_main"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:paddingTop="8dp" />
+
+    </LinearLayout>
+
+</FrameLayout>

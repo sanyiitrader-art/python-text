@@ -26,7 +26,9 @@ class RecentFilesAdapter(
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val item = items[position]
         holder.binding.tvRecentFileName.text = item.name
-        holder.binding.tvRecentFileName.setOnClickListener { onClick(item.path) }
+        // FIX: field was renamed path -> uriString when RecentFilesStore
+        // moved to SAF content:// URIs instead of filesystem paths.
+        holder.binding.tvRecentFileName.setOnClickListener { onClick(item.uriString) }
     }
 
     override fun getItemCount(): Int = items.size

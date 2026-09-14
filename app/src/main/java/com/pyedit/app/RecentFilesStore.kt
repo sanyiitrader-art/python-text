@@ -11,23 +11,20 @@ import kotlinx.coroutines.flow.map
 private val Context.dataStore by preferencesDataStore(name = "pyedit_state")
 
 /**
- * Spec §18/§63-64: persistent Recent files and persistent last active
- * file — must survive process death, not just be in-memory/session state.
- *
- * Recent entries are stored as one delimited string (no JSON library
- * needed for 3 plain-text fields — avoids adding Gson/Moshi just for
- * this). Field separator is U+0001, entry separator is newline; both are
- * control characters that can't appear in a filesystem path, so this is
- * safe without escaping.
+ * "path" fields now hold content:// URI strings (SAF), not filesystem
+ * paths — same structure as before, different meaning. Adds persisted
+ * root folder tree URI, since "the workspace" is now whatever folder the
+ * user picked, not a fixed app-private directory.
  */
 class RecentFilesStore(private val context: Context) {
 
-    data class RecentFile(val path: String, val name: String, val lastOpenedMillis: Long)
+    data class RecentFile(val uriString: String, val name: String, val lastOpenedMillis: Long)
 
     private object Keys {
         val RECENT = stringPreferencesKey("recent_files")
         val LAST_ACTIVE = stringPreferencesKey("last_active_file")
         val AUTOSAVE_ENABLED = stringPreferencesKey("autosave_enabled")
+        val ROOT_TREE_URI = stringPreferencesKey("root_tree_uri")
     }
 
     private val fieldSep = "\u0001"
@@ -37,13 +34,12 @@ class RecentFilesStore(private val context: Context) {
         parseRecent(prefs[Keys.RECENT] ?: "")
     }
 
-    suspend fun addRecent(path: String, name: String) {
+    suspend fun addRecent(uriString: String, name: String) {
         context.dataStore.edit { prefs ->
             val current = parseRecent(prefs[Keys.RECENT] ?: "").toMutableList()
-            current.removeAll { it.path == path } // avoid duplicate entries for the same file
-            current.add(0, RecentFile(path, name, System.currentTimeMillis()))
-            val trimmed = current.take(maxRecent)
-            prefs[Keys.RECENT] = serializeRecent(trimmed)
+            current.removeAll { it.uriString == uriString }
+            current.add(0, RecentFile(uriString, name, System.currentTimeMillis()))
+            prefs[Keys.RECENT] = serializeRecent(current.take(maxRecent))
         }
     }
 
@@ -51,13 +47,22 @@ class RecentFilesStore(private val context: Context) {
         context.dataStore.edit { prefs -> prefs[Keys.RECENT] = "" }
     }
 
-    suspend fun setLastActiveFile(path: String) {
-        context.dataStore.edit { prefs -> prefs[Keys.LAST_ACTIVE] = path }
+    suspend fun setLastActiveFile(uriString: String) {
+        context.dataStore.edit { prefs -> prefs[Keys.LAST_ACTIVE] = uriString }
     }
 
     suspend fun getLastActiveFile(): String? {
         val prefs = context.dataStore.data.first()
         return prefs[Keys.LAST_ACTIVE]?.takeIf { it.isNotBlank() }
+    }
+
+    suspend fun setRootTreeUri(uriString: String) {
+        context.dataStore.edit { prefs -> prefs[Keys.ROOT_TREE_URI] = uriString }
+    }
+
+    suspend fun getRootTreeUri(): String? {
+        val prefs = context.dataStore.data.first()
+        return prefs[Keys.ROOT_TREE_URI]?.takeIf { it.isNotBlank() }
     }
 
     suspend fun setAutosaveEnabled(enabled: Boolean) {
@@ -81,5 +86,5 @@ class RecentFilesStore(private val context: Context) {
     }
 
     private fun serializeRecent(list: List<RecentFile>): String =
-        list.joinToString("\n") { "${it.path}$fieldSep${it.name}$fieldSep${it.lastOpenedMillis}" }
+        list.joinToString("\n") { "${it.uriString}$fieldSep${it.name}$fieldSep${it.lastOpenedMillis}" }
 }

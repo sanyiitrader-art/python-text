@@ -154,7 +154,7 @@ class MainActivity : AppCompatActivity() {
                 val line = v.text.toString()
                 appendOutput("$line\n")
                 executionController.sendStdinLine(line)
-                v.text.clear()
+                v.setText("")
                 true
             } else {
                 false

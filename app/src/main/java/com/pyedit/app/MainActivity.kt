@@ -2,14 +2,20 @@ package com.pyedit.app
 
 import android.content.Intent
 import android.graphics.Rect
+import android.graphics.Typeface
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.text.Spannable
+import android.text.SpannableString
+import android.text.style.ForegroundColorSpan
+import android.text.style.StyleSpan
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import android.widget.PopupWindow
 import android.widget.SeekBar
@@ -129,7 +135,7 @@ class MainActivity : AppCompatActivity() {
             binding.outputPanel.root.visibility = View.VISIBLE
             isRunning = true
             binding.btnRun.setImageResource(R.drawable.ic_stop)
-            setStdinActive(false) // blocked until the script actually asks for input
+            setStdinActive(false)
             appendHeaderLine("$ python $name\n")
 
             executionController.run(scriptText, name, object : ExecutionController.Listener {
@@ -145,18 +151,24 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Styles just the "$ python <file>" line distinctly from real program
-    * output: italic + mint color, via a SpannableString appended to the
-    * same TextView (append() preserves spans on a Spanned CharSequence). */
+    /** Plain program output (stdout/stderr) — no special styling. */
+    private fun appendOutput(text: String) {
+        binding.outputPanel.tvOutputText.append(text)
+        binding.outputPanel.outputScroll.post {
+            binding.outputPanel.outputScroll.fullScroll(View.FOCUS_DOWN)
+        }
+    }
+
+    /** The "$ python <file>" line — italic + mint, distinct from real
+     * program output. append() on a TextView preserves spans from a
+     * Spanned CharSequence, so this and appendOutput() can freely
+     * interleave in the same TextView. */
     private fun appendHeaderLine(text: String) {
-        val spannable = android.text.SpannableString(text)
+        val spannable = SpannableString(text)
+        spannable.setSpan(StyleSpan(Typeface.ITALIC), 0, text.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
         spannable.setSpan(
-            android.text.style.StyleSpan(android.graphics.Typeface.ITALIC),
-            0, text.length, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-        )
-        spannable.setSpan(
-            android.text.style.ForegroundColorSpan(getColor(R.color.mint_primary)),
-            0, text.length, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+            ForegroundColorSpan(getColor(R.color.mint_primary)),
+            0, text.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
         )
         binding.outputPanel.tvOutputText.append(spannable)
         binding.outputPanel.outputScroll.post {
@@ -164,16 +176,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Only place that enables/focuses/shows-keyboard-for the input box —
-    * driven entirely by onInputRequested, never by the user tapping it. */
+    /** Only place that enables/focuses/keyboard-shows the input box —
+     * always driven by onInputRequested from the running script, never
+     * by the user tapping the box themselves. */
     private fun setStdinActive(active: Boolean) {
         val editStdin = binding.outputPanel.editStdin
         editStdin.isEnabled = active
         editStdin.alpha = if (active) 1f else 0.4f
         if (active) {
             editStdin.requestFocus()
-            val imm = getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
-            imm.showSoftInput(editStdin, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+            val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+            imm.showSoftInput(editStdin, InputMethodManager.SHOW_IMPLICIT)
         } else {
             editStdin.clearFocus()
         }
@@ -186,7 +199,7 @@ class MainActivity : AppCompatActivity() {
                 appendOutput("$line\n")
                 executionController.sendStdinLine(line)
                 v.setText("")
-                setStdinActive(false) // re-block until the NEXT input() call
+                setStdinActive(false)
                 true
             } else {
                 false

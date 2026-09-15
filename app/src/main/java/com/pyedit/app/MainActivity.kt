@@ -7,8 +7,11 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.text.Spannable
 import android.text.SpannableString
+import android.text.SpannableStringBuilder
+import android.text.Spannable
+import android.text.method.LinkMovementMethod
+import android.text.style.ClickableSpan
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
 import android.view.Gravity
@@ -59,6 +62,7 @@ class MainActivity : AppCompatActivity() {
     private var suppressDirtyTracking: Boolean = false
     private var hasFileOpen: Boolean = false
     private var isRunning: Boolean = false
+    private var lastErrorLine: Int? = null
 
     private val autosaveHandler = Handler(Looper.getMainLooper())
     private var autosaveRunnable: Runnable? = null
@@ -82,6 +86,8 @@ class MainActivity : AppCompatActivity() {
         workspace = WorkspaceManager(this)
         recentStore = RecentFilesStore(this)
         executionController = ExecutionController(this)
+
+        binding.outputPanel.tvOutputText.movementMethod = LinkMovementMethod.getInstance()
 
         sizeDrawerToScreenWidth()
         setupTopBar()
@@ -134,6 +140,7 @@ class MainActivity : AppCompatActivity() {
             binding.outputPanel.tvOutputText.text = ""
             binding.outputPanel.root.visibility = View.VISIBLE
             isRunning = true
+            lastErrorLine = null
             binding.btnRun.setImageResource(R.drawable.ic_stop)
             setStdinActive(false)
             appendHeaderLine("$ python $name\n")
@@ -146,6 +153,9 @@ class MainActivity : AppCompatActivity() {
                     isRunning = false
                     binding.btnRun.setImageResource(R.drawable.ic_run)
                     setStdinActive(false)
+                }
+                override fun onError(line: Int, errorType: String, message: String) = runOnUiThread {
+                    appendErrorSummary(line, errorType, message)
                 }
             })
         }
@@ -172,17 +182,58 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * FIX: previously set isEnabled + called requestFocus()/showSoftInput
-     * in the same instant, which could show the keyboard visually without
-     * the EditText actually holding real input focus (hence "keyboard
-     * appears but I still have to tap it"). Now: isEnabled/isFocusable
-     * flags are applied first, THEN the actual focus request is posted
-     * to run on the next layout pass (after those flags have taken
-     * effect), and SHOW_FORCED is used instead of SHOW_IMPLICIT so the
-     * keyboard reliably follows real focus rather than a hint. Also now
-     * explicitly hides the keyboard and strips focusability on
-     * deactivate, so "blocked" means truly untouchable, not just dimmed.
+     * Spec §54-58: error summary + a clickable "Jump to line N" action.
+     * The full traceback already streamed in via onStderr — this adds a
+     * short, distinctly-styled summary plus the jump affordance under it.
      */
+    private fun appendErrorSummary(line: Int, errorType: String, message: String) {
+        lastErrorLine = if (line > 0) line else null
+
+        val summaryText = "\n$errorType: $message\n"
+        val summarySpan = SpannableString(summaryText)
+        summarySpan.setSpan(
+            ForegroundColorSpan(getColor(R.color.error_color)),
+            0, summaryText.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+        )
+        binding.outputPanel.tvOutputText.append(summarySpan)
+
+        if (line > 0) {
+            val jumpText = "Jump to line $line"
+            val jumpSpan = SpannableString(jumpText)
+            jumpSpan.setSpan(object : ClickableSpan() {
+                override fun onClick(widget: View) {
+                    jumpToErrorLine()
+                }
+                override fun updateDrawState(ds: android.text.TextPaint) {
+                    ds.color = getColor(R.color.mint_primary)
+                    ds.isUnderlineText = true
+                }
+            }, 0, jumpText.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            binding.outputPanel.tvOutputText.append(jumpSpan)
+            binding.outputPanel.tvOutputText.append("\n")
+        }
+
+        binding.outputPanel.outputScroll.post {
+            binding.outputPanel.outputScroll.fullScroll(View.FOCUS_DOWN)
+        }
+    }
+
+    /**
+     * Spec §57-58: switches to the editor and moves the cursor to the
+     * error line. Highlighting relies on the editor's own already-
+     * confirmed default current-line highlight and cursor-follow-scroll
+     * (both proven working since Phase 1) rather than any new/unverified
+     * diagnostics API.
+     */
+    private fun jumpToErrorLine() {
+        val line = lastErrorLine ?: return
+        val zeroBasedLine = (line - 1).coerceIn(0, maxOf(0, editor.text.lineCount - 1))
+        showEditorState()
+        try {
+            editor.setSelection(zeroBasedLine, 0)
+        } catch (t: Throwable) { /* best-effort */ }
+    }
+
     private fun setStdinActive(active: Boolean) {
         val editStdin = binding.outputPanel.editStdin
         editStdin.isEnabled = active
@@ -248,14 +299,53 @@ class MainActivity : AppCompatActivity() {
             popupBinding.menuItemSave.setOnClickListener { popup.dismiss(); saveCurrentFile() }
             popupBinding.menuItemSaveAs.setOnClickListener { popup.dismiss(); showSaveAsDialog() }
             popupBinding.menuItemEditorSettings.setOnClickListener { popup.dismiss(); showEditorSettingsDialog() }
+            popupBinding.menuItemCompile.setOnClickListener { popup.dismiss(); runCompileCheck() }
             val dismissOnly = View.OnClickListener { popup.dismiss() }
             popupBinding.menuItemFind.setOnClickListener(dismissOnly)
             popupBinding.menuItemReplace.setOnClickListener(dismissOnly)
             popupBinding.menuItemGoToLine.setOnClickListener(dismissOnly)
-            popupBinding.menuItemCompile.setOnClickListener(dismissOnly)
         }
 
         popup.showAsDropDown(anchor, 0, 8)
+    }
+
+    /**
+     * Spec §71: "Compile" = syntax check only, never executes the script.
+     * Uses check_syntax() in pyedit_runner.py, run inline here (fast,
+     * no need for the separate :pyexec process/service machinery that
+     * real execution needs).
+     */
+    private fun runCompileCheck() {
+        val scriptText = editor.text.toString()
+        val name = currentFileDoc?.name ?: "untitled.py"
+        try {
+            val com.chaquo.python.Python? = null // placeholder removed below
+        } catch (t: Throwable) { /* unreachable, see below */ }
+
+        try {
+            if (!com.chaquo.python.Python.isStarted()) {
+                com.chaquo.python.Python.start(com.chaquo.python.android.AndroidPlatform(this))
+            }
+            val py = com.chaquo.python.Python.getInstance()
+            val runner = py.getModule("pyedit_runner")
+            val result = runner.callAttr("check_syntax", scriptText, name)
+            val ok = result.asList()[0].toBoolean()
+            binding.outputPanel.root.visibility = View.VISIBLE
+            binding.outputPanel.tvOutputText.text = ""
+            appendHeaderLine("$ python -m py_compile $name\n")
+            if (ok) {
+                appendOutput("No syntax errors found.\n")
+            } else {
+                val errInfo = result.asList()[1]
+                val errList = errInfo.asList()
+                val line = errList[0].toInt()
+                val type = errList[1].toString()
+                val message = errList[2].toString()
+                appendErrorSummary(line, type, message)
+            }
+        } catch (t: Throwable) {
+            showCrashDiagnostic("Compile check failed", t)
+        }
     }
 
     private fun updateActionAvailability() {

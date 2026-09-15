@@ -24,15 +24,23 @@ class PythonExecutionService : Service() {
     }
 
     inner class StdinReader {
-        /**
-         * Notifies the client the instant input() actually blocks,
-         * BEFORE calling take() — so the UI only ever activates the
-         * input box when Python is genuinely waiting on it, never
-         * preemptively/speculatively.
-         */
         fun readLine(): String {
             sendToClient(ExecutionProtocol.MSG_INPUT_REQUESTED, "")
             return stdinQueue.take()
+        }
+    }
+
+    /** Called directly by pyedit_runner.py when an error/exception occurs. */
+    inner class ErrorReporter {
+        fun report(line: Int, errorType: String, message: String) {
+            val messenger = clientMessenger ?: return
+            val msg = Message.obtain(null, ExecutionProtocol.MSG_ERROR)
+            msg.data.putInt(ExecutionProtocol.KEY_ERROR_LINE, line)
+            msg.data.putString(ExecutionProtocol.KEY_ERROR_TYPE, errorType)
+            msg.data.putString(ExecutionProtocol.KEY_ERROR_MESSAGE, message)
+            try {
+                messenger.send(msg)
+            } catch (t: Throwable) { /* client process gone */ }
         }
     }
 
@@ -75,7 +83,8 @@ class PythonExecutionService : Service() {
                     path,
                     StreamEmitter(ExecutionProtocol.MSG_STDOUT),
                     StreamEmitter(ExecutionProtocol.MSG_STDERR),
-                    StdinReader()
+                    StdinReader(),
+                    ErrorReporter()
                 )
             } catch (t: Throwable) {
                 sendToClient(ExecutionProtocol.MSG_STDERR, "Execution error: ${t.message}\n")
@@ -91,8 +100,6 @@ class PythonExecutionService : Service() {
         msg.data.putString(ExecutionProtocol.KEY_TEXT, text)
         try {
             messenger.send(msg)
-        } catch (t: Throwable) {
-            // Client process gone — nothing to do.
-        }
+        } catch (t: Throwable) { /* client process gone */ }
     }
 }

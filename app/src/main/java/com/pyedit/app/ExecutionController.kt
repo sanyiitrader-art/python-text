@@ -17,8 +17,8 @@ class ExecutionController(private val context: Context) {
         fun onStdout(text: String)
         fun onStderr(text: String)
         fun onExited()
-        /** Python's input() is now actually blocked waiting for a line. */
         fun onInputRequested()
+        fun onError(line: Int, errorType: String, message: String)
     }
 
     private var serviceMessenger: Messenger? = null
@@ -35,6 +35,12 @@ class ExecutionController(private val context: Context) {
                 listener?.onExited()
             ExecutionProtocol.MSG_INPUT_REQUESTED ->
                 listener?.onInputRequested()
+            ExecutionProtocol.MSG_ERROR -> {
+                val line = msg.data.getInt(ExecutionProtocol.KEY_ERROR_LINE)
+                val type = msg.data.getString(ExecutionProtocol.KEY_ERROR_TYPE) ?: "Error"
+                val message = msg.data.getString(ExecutionProtocol.KEY_ERROR_MESSAGE) ?: ""
+                listener?.onError(line, type, message)
+            }
         }
         true
     })
@@ -69,16 +75,16 @@ class ExecutionController(private val context: Context) {
         }
     }
 
+    fun sendStdinLine(line: String) {
+        val msg = Message.obtain(null, ExecutionProtocol.MSG_STDIN_LINE)
+        msg.data.putString(ExecutionProtocol.KEY_TEXT, line)
+        serviceMessenger?.send(msg)
+    }
+
     private fun runInternal(scriptPath: String) {
         val msg = Message.obtain(null, ExecutionProtocol.MSG_RUN)
         msg.replyTo = clientMessenger
         msg.data.putString(ExecutionProtocol.KEY_SCRIPT_PATH, scriptPath)
-        serviceMessenger?.send(msg)
-    }
-
-    fun sendStdinLine(line: String) {
-        val msg = Message.obtain(null, ExecutionProtocol.MSG_STDIN_LINE)
-        msg.data.putString(ExecutionProtocol.KEY_TEXT, line)
         serviceMessenger?.send(msg)
     }
 

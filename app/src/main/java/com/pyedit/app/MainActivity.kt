@@ -7,9 +7,9 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.text.SpannableString
-import android.text.SpannableStringBuilder
 import android.text.Spannable
+import android.text.SpannableString
+import android.text.TextPaint
 import android.text.method.LinkMovementMethod
 import android.text.style.ClickableSpan
 import android.text.style.ForegroundColorSpan
@@ -29,6 +29,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.chaquo.python.Python
+import com.chaquo.python.android.AndroidPlatform
 import com.pyedit.app.databinding.ActivityMainBinding
 import com.pyedit.app.databinding.DialogEditorSettingsBinding
 import com.pyedit.app.databinding.DialogSaveAsBinding
@@ -204,7 +206,7 @@ class MainActivity : AppCompatActivity() {
                 override fun onClick(widget: View) {
                     jumpToErrorLine()
                 }
-                override fun updateDrawState(ds: android.text.TextPaint) {
+                override fun updateDrawState(ds: TextPaint) {
                     ds.color = getColor(R.color.mint_primary)
                     ds.isUnderlineText = true
                 }
@@ -311,33 +313,32 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Spec §71: "Compile" = syntax check only, never executes the script.
-     * Uses check_syntax() in pyedit_runner.py, run inline here (fast,
-     * no need for the separate :pyexec process/service machinery that
-     * real execution needs).
+     * Uses check_syntax() in pyedit_runner.py, run inline on this side
+     * (fast, no need for the separate :pyexec process/service machinery
+     * that real execution needs).
      */
     private fun runCompileCheck() {
         val scriptText = editor.text.toString()
         val name = currentFileDoc?.name ?: "untitled.py"
-        try {
-            val com.chaquo.python.Python? = null // placeholder removed below
-        } catch (t: Throwable) { /* unreachable, see below */ }
 
         try {
-            if (!com.chaquo.python.Python.isStarted()) {
-                com.chaquo.python.Python.start(com.chaquo.python.android.AndroidPlatform(this))
+            if (!Python.isStarted()) {
+                Python.start(AndroidPlatform(this))
             }
-            val py = com.chaquo.python.Python.getInstance()
+            val py = Python.getInstance()
             val runner = py.getModule("pyedit_runner")
             val result = runner.callAttr("check_syntax", scriptText, name)
-            val ok = result.asList()[0].toBoolean()
+            val resultList = result.asList()
+            val ok = resultList[0].toBoolean()
+
             binding.outputPanel.root.visibility = View.VISIBLE
             binding.outputPanel.tvOutputText.text = ""
             appendHeaderLine("$ python -m py_compile $name\n")
+
             if (ok) {
                 appendOutput("No syntax errors found.\n")
             } else {
-                val errInfo = result.asList()[1]
-                val errList = errInfo.asList()
+                val errList = resultList[1].asList()
                 val line = errList[0].toInt()
                 val type = errList[1].toString()
                 val message = errList[2].toString()

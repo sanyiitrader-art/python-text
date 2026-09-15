@@ -151,7 +151,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Plain program output (stdout/stderr) — no special styling. */
     private fun appendOutput(text: String) {
         binding.outputPanel.tvOutputText.append(text)
         binding.outputPanel.outputScroll.post {
@@ -159,10 +158,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** The "$ python <file>" line — italic + mint, distinct from real
-     * program output. append() on a TextView preserves spans from a
-     * Spanned CharSequence, so this and appendOutput() can freely
-     * interleave in the same TextView. */
     private fun appendHeaderLine(text: String) {
         val spannable = SpannableString(text)
         spannable.setSpan(StyleSpan(Typeface.ITALIC), 0, text.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
@@ -176,19 +171,35 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Only place that enables/focuses/keyboard-shows the input box —
-     * always driven by onInputRequested from the running script, never
-     * by the user tapping the box themselves. */
+    /**
+     * FIX: previously set isEnabled + called requestFocus()/showSoftInput
+     * in the same instant, which could show the keyboard visually without
+     * the EditText actually holding real input focus (hence "keyboard
+     * appears but I still have to tap it"). Now: isEnabled/isFocusable
+     * flags are applied first, THEN the actual focus request is posted
+     * to run on the next layout pass (after those flags have taken
+     * effect), and SHOW_FORCED is used instead of SHOW_IMPLICIT so the
+     * keyboard reliably follows real focus rather than a hint. Also now
+     * explicitly hides the keyboard and strips focusability on
+     * deactivate, so "blocked" means truly untouchable, not just dimmed.
+     */
     private fun setStdinActive(active: Boolean) {
         val editStdin = binding.outputPanel.editStdin
         editStdin.isEnabled = active
+        editStdin.isFocusable = active
+        editStdin.isFocusableInTouchMode = active
         editStdin.alpha = if (active) 1f else 0.4f
+
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
         if (active) {
-            editStdin.requestFocus()
-            val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
-            imm.showSoftInput(editStdin, InputMethodManager.SHOW_IMPLICIT)
+            editStdin.post {
+                editStdin.requestFocus()
+                editStdin.setSelection(editStdin.text.length)
+                imm.showSoftInput(editStdin, InputMethodManager.SHOW_FORCED)
+            }
         } else {
             editStdin.clearFocus()
+            imm.hideSoftInputFromWindow(editStdin.windowToken, 0)
         }
     }
 

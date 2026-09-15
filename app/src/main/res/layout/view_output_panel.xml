@@ -30,8 +30,9 @@
         android:background="@color/topbar_background"
         android:padding="6dp">
 
-        <!-- Starts disabled/dimmed (not enabled) — only activated by
-             MainActivity exactly when input() blocks. -->
+        <!-- focusable/focusableInTouchMode explicitly false at rest, so
+             this can NEVER be tapped into or take focus except when
+             MainActivity explicitly activates it from onInputRequested. -->
         <EditText
             android:id="@+id/edit_stdin"
             android:layout_width="0dp"
@@ -45,6 +46,8 @@
             android:imeOptions="actionSend"
             android:singleLine="true"
             android:enabled="false"
+            android:focusable="false"
+            android:focusableInTouchMode="false"
             android:alpha="0.4" />
 
     </LinearLayout>

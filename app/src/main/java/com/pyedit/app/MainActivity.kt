@@ -9,13 +9,12 @@ import android.os.Handler
 import android.os.Looper
 import android.text.Spannable
 import android.text.SpannableString
-import android.text.TextPaint
 import android.text.method.LinkMovementMethod
-import android.text.style.ClickableSpan
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
@@ -39,6 +38,7 @@ import com.pyedit.app.databinding.PopupMenuBinding
 import io.github.rosemoe.sora.text.Content
 import io.github.rosemoe.sora.text.ContentListener
 import io.github.rosemoe.sora.widget.CodeEditor
+import io.github.rosemoe.sora.widget.schemes.EditorColorScheme
 import kotlinx.coroutines.launch
 import java.io.PrintWriter
 import java.io.StringWriter
@@ -65,6 +65,7 @@ class MainActivity : AppCompatActivity() {
     private var hasFileOpen: Boolean = false
     private var isRunning: Boolean = false
     private var lastErrorLine: Int? = null
+    private var errorHighlightActive: Boolean = false
 
     private val autosaveHandler = Handler(Looper.getMainLooper())
     private var autosaveRunnable: Runnable? = null
@@ -184,9 +185,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Spec §54-58: error summary + a clickable "Jump to line N" action.
-     * The full traceback already streamed in via onStderr — this adds a
-     * short, distinctly-styled summary plus the jump affordance under it.
+     * FIX: no more clickable "Jump to line" link — per spec, error
+     * navigation now happens automatically the instant the error is
+     * reported, no tap required.
      */
     private fun appendErrorSummary(line: Int, errorType: String, message: String) {
         lastErrorLine = if (line > 0) line else null
@@ -198,41 +199,60 @@ class MainActivity : AppCompatActivity() {
             0, summaryText.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
         )
         binding.outputPanel.tvOutputText.append(summarySpan)
-
-        if (line > 0) {
-            val jumpText = "Jump to line $line"
-            val jumpSpan = SpannableString(jumpText)
-            jumpSpan.setSpan(object : ClickableSpan() {
-                override fun onClick(widget: View) {
-                    jumpToErrorLine()
-                }
-                override fun updateDrawState(ds: TextPaint) {
-                    ds.color = getColor(R.color.mint_primary)
-                    ds.isUnderlineText = true
-                }
-            }, 0, jumpText.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-            binding.outputPanel.tvOutputText.append(jumpSpan)
-            binding.outputPanel.tvOutputText.append("\n")
-        }
-
         binding.outputPanel.outputScroll.post {
             binding.outputPanel.outputScroll.fullScroll(View.FOCUS_DOWN)
         }
+
+        if (line > 0) {
+            jumpToErrorLine()
+        }
     }
 
-    /**
-     * Spec §57-58: switches to the editor and moves the cursor to the
-     * error line. Highlighting relies on the editor's own already-
-     * confirmed default current-line highlight and cursor-follow-scroll
-     * (both proven working since Phase 1) rather than any new/unverified
-     * diagnostics API.
-     */
     private fun jumpToErrorLine() {
         val line = lastErrorLine ?: return
         val zeroBasedLine = (line - 1).coerceIn(0, maxOf(0, editor.text.lineCount - 1))
         showEditorState()
+        highlightErrorLine(zeroBasedLine)
+    }
+
+    /**
+     * Highlights the full error line by selecting its entire text and
+     * temporarily recoloring the selection background to red — reusing
+     * the editor's already-proven selection rendering rather than a new
+     * diagnostics/marker API. Cleared (color restored, selection
+     * collapsed) the moment the user touches the editor, per spec.
+     *
+     * Honest flag: setSelectionRegion(startLine, startCol, endLine,
+     * endCol) is a reasonable guess at CodeEditor's range-selection API
+     * (a natural sibling to the already-proven single-position
+     * setSelection), but unverified until it compiles. Falls back to a
+     * plain cursor placement (still auto-jumps, just without the
+     * highlight) if it doesn't exist.
+     */
+    private fun highlightErrorLine(zeroBasedLine: Int) {
         try {
-            editor.setSelection(zeroBasedLine, 0)
+            editor.colorScheme.setColor(
+                EditorColorScheme.SELECTED_TEXT_BACKGROUND,
+                getColor(R.color.error_color)
+            )
+            val lineLength = editor.text.getLineString(zeroBasedLine).length
+            editor.setSelectionRegion(zeroBasedLine, 0, zeroBasedLine, lineLength)
+            errorHighlightActive = true
+        } catch (t: Throwable) {
+            try {
+                editor.setSelection(zeroBasedLine, 0)
+            } catch (t2: Throwable) { /* best-effort */ }
+        }
+    }
+
+    private fun clearErrorHighlightIfActive() {
+        if (!errorHighlightActive) return
+        errorHighlightActive = false
+        try {
+            editor.colorScheme.setColor(
+                EditorColorScheme.SELECTED_TEXT_BACKGROUND,
+                getColor(R.color.selection_overlay)
+            )
         } catch (t: Throwable) { /* best-effort */ }
     }
 
@@ -311,12 +331,6 @@ class MainActivity : AppCompatActivity() {
         popup.showAsDropDown(anchor, 0, 8)
     }
 
-    /**
-     * Spec §71: "Compile" = syntax check only, never executes the script.
-     * Uses check_syntax() in pyedit_runner.py, run inline on this side
-     * (fast, no need for the separate :pyexec process/service machinery
-     * that real execution needs).
-     */
     private fun runCompileCheck() {
         val scriptText = editor.text.toString()
         val name = currentFileDoc?.name ?: "untitled.py"
@@ -411,6 +425,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         attachContentBehaviors()
+
+        // Clears the red error-line highlight the moment the user taps
+        // into the editor to place/activate the cursor — returns false
+        // so normal editor touch handling (cursor placement, selection,
+        // scrolling) is completely unaffected.
+        editor.setOnTouchListener { _, event ->
+            if (event.action == MotionEvent.ACTION_DOWN) {
+                clearErrorHighlightIfActive()
+            }
+            false
+        }
 
         applyFontSize(editorSettings.fontSize)
         applyTabSize(editorSettings.tabSize)
@@ -558,6 +583,7 @@ class MainActivity : AppCompatActivity() {
             updateActionAvailability()
             showEditorState()
             binding.outputPanel.root.visibility = View.GONE
+            clearErrorHighlightIfActive()
             lifecycleScope.launch {
                 recentStore.addRecent(doc.uri.toString(), doc.name ?: "untitled.py")
                 recentStore.setLastActiveFile(doc.uri.toString())

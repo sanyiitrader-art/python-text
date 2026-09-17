@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Exact palette from the spec — do not introduce other colors. -->
     <color name="editor_background">#111315</color>
     <color name="topbar_background">#181B1E</color>
     <color name="gutter_background">#0D0F10</color>
@@ -15,8 +14,6 @@
     <color name="warning_color">#FFC857</color>
     <color name="success_color">#58D68D</color>
 
-    <!-- Selection/highlight overlays use transparency of the mint accent,
-         per spec §15 ("transparency may be used for selection/highlight
-         effects"), not a new color. -->
     <color name="selection_overlay">#3365E6B3</color>
+    <color name="error_highlight_overlay">#4DFF5C5C</color>
 </resources>

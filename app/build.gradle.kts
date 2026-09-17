@@ -53,13 +53,13 @@ android {
 
 chaquopy {
     defaultConfig {
-        // Upgraded from 3.11 to 3.13 — Chaquopy officially added Python
-        // 3.13 support (confirmed via their own release notes), and our
-        // pinned plugin version (17.0.0) postdates the 16.1 release that
-        // shipped it, so this is a safe, verified upgrade rather than a
-        // guess. Gives the interpreter itself full modern-syntax support
-        // (match/case, walrus operator, etc.) at the execution level.
-        version = "3.13"
+        // REVERTED from 3.13: that build only ships native libs for
+        // arm64-v8a/x86_64, dropping armeabi-v7a/x86 — which conflicts
+        // with spec §10's requirement to support all four ABI families.
+        // 3.11 already includes match/case, the walrus operator, and
+        // structural pattern matching, so this only misses syntax
+        // introduced specifically in 3.12+.
+        version = "3.11"
     }
 }
 

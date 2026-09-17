@@ -66,6 +66,7 @@ class MainActivity : AppCompatActivity() {
     private var isRunning: Boolean = false
     private var lastErrorLine: Int? = null
     private var errorHighlightActive: Boolean = false
+    private var isKeyboardVisible: Boolean = false
 
     private val autosaveHandler = Handler(Looper.getMainLooper())
     private var autosaveRunnable: Runnable? = null
@@ -184,11 +185,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * FIX: no more clickable "Jump to line" link — per spec, error
-     * navigation now happens automatically the instant the error is
-     * reported, no tap required.
-     */
     private fun appendErrorSummary(line: Int, errorType: String, message: String) {
         lastErrorLine = if (line > 0) line else null
 
@@ -215,25 +211,13 @@ class MainActivity : AppCompatActivity() {
         highlightErrorLine(zeroBasedLine)
     }
 
-    /**
-     * Highlights the full error line by selecting its entire text and
-     * temporarily recoloring the selection background to red — reusing
-     * the editor's already-proven selection rendering rather than a new
-     * diagnostics/marker API. Cleared (color restored, selection
-     * collapsed) the moment the user touches the editor, per spec.
-     *
-     * Honest flag: setSelectionRegion(startLine, startCol, endLine,
-     * endCol) is a reasonable guess at CodeEditor's range-selection API
-     * (a natural sibling to the already-proven single-position
-     * setSelection), but unverified until it compiles. Falls back to a
-     * plain cursor placement (still auto-jumps, just without the
-     * highlight) if it doesn't exist.
-     */
+    /** FIX: now uses error_highlight_overlay (transparent) instead of
+     * the solid error_color, per request #1. */
     private fun highlightErrorLine(zeroBasedLine: Int) {
         try {
             editor.colorScheme.setColor(
                 EditorColorScheme.SELECTED_TEXT_BACKGROUND,
-                getColor(R.color.error_color)
+                getColor(R.color.error_highlight_overlay)
             )
             val lineLength = editor.text.getLineString(zeroBasedLine).length
             editor.setSelectionRegion(zeroBasedLine, 0, zeroBasedLine, lineLength)
@@ -256,6 +240,16 @@ class MainActivity : AppCompatActivity() {
         } catch (t: Throwable) { /* best-effort */ }
     }
 
+    /**
+     * FIX for request #2: previously called showSoftInput unconditionally
+     * every time input was needed, which could toggle/dismiss an already-
+     * open keyboard instead of just retargeting it. Now: only call
+     * showSoftInput when the keyboard is NOT currently visible (tracked
+     * by setupKeyboardAwareToolbar's listener below). If it's already
+     * open, just move focus to the input box — Android naturally
+     * redirects the existing keyboard to whichever view has focus,
+     * without any show/hide call needed.
+     */
     private fun setStdinActive(active: Boolean) {
         val editStdin = binding.outputPanel.editStdin
         editStdin.isEnabled = active
@@ -268,7 +262,9 @@ class MainActivity : AppCompatActivity() {
             editStdin.post {
                 editStdin.requestFocus()
                 editStdin.setSelection(editStdin.text.length)
-                imm.showSoftInput(editStdin, InputMethodManager.SHOW_FORCED)
+                if (!isKeyboardVisible) {
+                    imm.showSoftInput(editStdin, InputMethodManager.SHOW_FORCED)
+                }
             }
         } else {
             editStdin.clearFocus()
@@ -426,10 +422,6 @@ class MainActivity : AppCompatActivity() {
 
         attachContentBehaviors()
 
-        // Clears the red error-line highlight the moment the user taps
-        // into the editor to place/activate the cursor — returns false
-        // so normal editor touch handling (cursor placement, selection,
-        // scrolling) is completely unaffected.
         editor.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
                 clearErrorHighlightIfActive()
@@ -789,6 +781,8 @@ class MainActivity : AppCompatActivity() {
         if (toRemove > 0) editor.text.delete(line, col - toRemove, line, col)
     }
 
+    /** FIX: now also updates isKeyboardVisible, which setStdinActive
+     * reads to decide whether showSoftInput needs to be called at all. */
     private fun setupKeyboardAwareToolbar() {
         val rootView = binding.root
         rootView.viewTreeObserver.addOnGlobalLayoutListener {
@@ -797,8 +791,8 @@ class MainActivity : AppCompatActivity() {
             val screenHeight = rootView.rootView.height
             if (screenHeight == 0) return@addOnGlobalLayoutListener
             val heightDiff = screenHeight - visibleFrame.bottom
-            val keyboardVisible = heightDiff > screenHeight * 0.15
-            binding.pythonToolbar.root.visibility = if (keyboardVisible) View.VISIBLE else View.GONE
+            isKeyboardVisible = heightDiff > screenHeight * 0.15
+            binding.pythonToolbar.root.visibility = if (isKeyboardVisible) View.VISIBLE else View.GONE
         }
     }
 }

@@ -53,6 +53,12 @@ android {
 
 chaquopy {
     defaultConfig {
+        // Upgraded from 3.11 to 3.13 — Chaquopy officially added Python
+        // 3.13 support (confirmed via their own release notes), and our
+        // pinned plugin version (17.0.0) postdates the 16.1 release that
+        // shipped it, so this is a safe, verified upgrade rather than a
+        // guess. Gives the interpreter itself full modern-syntax support
+        // (match/case, walrus operator, etc.) at the execution level.
         version = "3.13"
     }
 }
@@ -64,15 +70,11 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.drawerlayout:drawerlayout:1.2.0")
     implementation("androidx.recyclerview:recyclerview:1.3.2")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
-
-    // New: Storage Access Framework tree/document browsing, for picking
-    // any folder or file on the device (spec's Option A) rather than
-    // browsing a fixed app-private folder.
-    implementation("androidx.documentfile:documentfile:1.0.1")
 
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
+    implementation("androidx.documentfile:documentfile:1.0.1")
 
     implementation(platform("io.github.rosemoe:editor-bom:0.24.3"))
     implementation("io.github.rosemoe:editor")

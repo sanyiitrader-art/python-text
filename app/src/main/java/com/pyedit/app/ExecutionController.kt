@@ -1,116 +1,251 @@
 package com.pyedit.app
 
-import android.app.ActivityManager
-import android.content.ComponentName
-import android.content.Context
-import android.content.Intent
-import android.content.ServiceConnection
-import android.os.IBinder
-import android.os.Message
-import android.os.Messenger
-import android.os.Process
-import java.io.File
+import android.graphics.Rect
+import android.view.MotionEvent
+import android.view.View
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import android.widget.SeekBar
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import com.pyedit.app.databinding.ActivityMainBinding
+import com.pyedit.app.databinding.DialogEditorSettingsBinding
+import io.github.rosemoe.sora.text.Content
+import io.github.rosemoe.sora.text.ContentListener
+import io.github.rosemoe.sora.widget.CodeEditor
+import io.github.rosemoe.sora.widget.schemes.EditorColorScheme
 
-class ExecutionController(private val context: Context) {
+/**
+ * Owns the CodeEditor itself: creation, color scheme, smart-editing
+ * attachment, font/tab size, the Python toolbar, keyboard-aware toolbar
+ * visibility, cursor styling, and the error-line highlight. Split out of
+ * MainActivity purely to keep file sizes manageable — no behavior here
+ * is new, it's the same code that was already working.
+ */
+class EditorController(
+    private val activity: AppCompatActivity,
+    private val binding: ActivityMainBinding,
+    private val editorSettings: EditorSettings,
+    private val onError: (String, Throwable) -> Unit
+) {
+    lateinit var editor: CodeEditor
 
-    interface Listener {
-        fun onStdout(text: String)
-        fun onStderr(text: String)
-        fun onExited()
-        fun onInputRequested()
-        fun onError(line: Int, errorType: String, message: String)
-    }
+    private var pythonEditingBehavior: PythonEditingBehavior? = null
+    private var suppressContentCallback = false
+    private var onUserEdit: (() -> Unit)? = null
+    private var errorHighlightActive = false
+    private var isKeyboardVisible = false
 
-    private var serviceMessenger: Messenger? = null
-    private var listener: Listener? = null
-    private var bound = false
+    fun setup() {
+        editor = CodeEditor(activity)
+        editor.layoutParams = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT
+        )
+        binding.editorContainer.addView(editor)
+        editor.isWordwrap = false
 
-    private val clientMessenger = Messenger(android.os.Handler(android.os.Looper.getMainLooper()) { msg ->
-        when (msg.what) {
-            ExecutionProtocol.MSG_STDOUT ->
-                listener?.onStdout(msg.data.getString(ExecutionProtocol.KEY_TEXT) ?: "")
-            ExecutionProtocol.MSG_STDERR ->
-                listener?.onStderr(msg.data.getString(ExecutionProtocol.KEY_TEXT) ?: "")
-            ExecutionProtocol.MSG_EXITED ->
-                listener?.onExited()
-            ExecutionProtocol.MSG_INPUT_REQUESTED ->
-                listener?.onInputRequested()
-            ExecutionProtocol.MSG_ERROR -> {
-                val line = msg.data.getInt(ExecutionProtocol.KEY_ERROR_LINE)
-                val type = msg.data.getString(ExecutionProtocol.KEY_ERROR_TYPE) ?: "Error"
-                val message = msg.data.getString(ExecutionProtocol.KEY_ERROR_MESSAGE) ?: ""
-                listener?.onError(line, type, message)
-            }
-        }
-        true
-    })
-
-    private val connection = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName, binder: IBinder) {
-            serviceMessenger = Messenger(binder)
-            bound = true
-            pendingScriptPath?.let { runInternal(it) }
-            pendingScriptPath = null
-        }
-
-        override fun onServiceDisconnected(name: ComponentName) {
-            serviceMessenger = null
-            bound = false
-        }
-    }
-
-    private var pendingScriptPath: String? = null
-
-    fun run(scriptText: String, scriptDisplayName: String, listener: Listener) {
-        this.listener = listener
-        val tempFile = File(context.cacheDir, "run_${scriptDisplayName.substringBeforeLast('.')}.py")
-        tempFile.writeText(scriptText)
-
-        if (bound) {
-            runInternal(tempFile.absolutePath)
-        } else {
-            pendingScriptPath = tempFile.absolutePath
-            val intent = Intent(context, PythonExecutionService::class.java)
-            context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
-        }
-    }
-
-    fun sendStdinLine(line: String) {
-        val msg = Message.obtain(null, ExecutionProtocol.MSG_STDIN_LINE)
-        msg.data.putString(ExecutionProtocol.KEY_TEXT, line)
-        serviceMessenger?.send(msg)
-    }
-
-    private fun runInternal(scriptPath: String) {
-        val msg = Message.obtain(null, ExecutionProtocol.MSG_RUN)
-        msg.replyTo = clientMessenger
-        msg.data.putString(ExecutionProtocol.KEY_SCRIPT_PATH, scriptPath)
-        serviceMessenger?.send(msg)
-    }
-
-    fun stop() {
-        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-        val targetProcessName = "${context.packageName}:pyexec"
-        val runningProcesses = am.runningAppProcesses ?: return
-        for (info in runningProcesses) {
-            if (info.processName == targetProcessName) {
-                Process.killProcess(info.pid)
-                break
-            }
-        }
         try {
-            context.unbindService(connection)
-        } catch (t: Throwable) { /* already unbound */ }
-        bound = false
-        serviceMessenger = null
+            PythonLanguage.attach(activity, editor)
+        } catch (t: Throwable) {
+            onError("Color scheme failed", t)
+        }
+
+        attachContentBehaviors()
+
+        editor.setOnTouchListener { _, event ->
+            if (event.action == MotionEvent.ACTION_DOWN) {
+                clearErrorHighlightIfActive()
+            }
+            false
+        }
+
+        applyFontSize(editorSettings.fontSize)
+        applyTabSize(editorSettings.tabSize)
+        applyVisualPolish()
+        setupPythonToolbar()
+        setupKeyboardAwareToolbar()
     }
 
-    fun teardown() {
-        if (bound) {
-            try {
-                context.unbindService(connection)
-            } catch (t: Throwable) { /* ignore */ }
-        }
-        bound = false
+    /** FileController registers itself here to hear about real user edits
+     * (not programmatic loadText calls). */
+    fun onContentChanged(callback: () -> Unit) {
+        onUserEdit = callback
     }
+
+    fun getText(): String = editor.text.toString()
+
+    fun loadText(content: String) {
+        suppressContentCallback = true
+        editor.setText(content)
+        attachContentBehaviors()
+        suppressContentCallback = false
+    }
+
+    private fun attachContentBehaviors() {
+        try {
+            val behavior = PythonEditingBehavior(editor)
+            behavior.attach()
+            pythonEditingBehavior = behavior
+        } catch (t: Throwable) {
+            onError("Smart editing setup failed", t)
+        }
+
+        editor.text.addContentListener(object : ContentListener {
+            override fun beforeReplace(content: Content) {}
+            override fun afterInsert(
+                content: Content, startLine: Int, startColumn: Int,
+                endLine: Int, endColumn: Int, insertedContent: CharSequence
+            ) = notifyEdit()
+            override fun afterDelete(
+                content: Content, startLine: Int, startColumn: Int,
+                endLine: Int, endColumn: Int, deletedContent: CharSequence
+            ) = notifyEdit()
+        })
+    }
+
+    private fun notifyEdit() {
+        if (suppressContentCallback) return
+        onUserEdit?.invoke()
+    }
+
+    fun jumpToLine(oneBasedLine: Int) {
+        val zeroBasedLine = (oneBasedLine - 1).coerceIn(0, maxOf(0, editor.text.lineCount - 1))
+        highlightErrorLine(zeroBasedLine)
+    }
+
+    private fun highlightErrorLine(zeroBasedLine: Int) {
+        try {
+            editor.colorScheme.setColor(
+                EditorColorScheme.SELECTED_TEXT_BACKGROUND,
+                activity.getColor(R.color.error_highlight_overlay)
+            )
+            val lineLength = editor.text.getLineString(zeroBasedLine).length
+            editor.setSelectionRegion(zeroBasedLine, 0, zeroBasedLine, lineLength)
+            errorHighlightActive = true
+        } catch (t: Throwable) {
+            try {
+                editor.setSelection(zeroBasedLine, 0)
+            } catch (t2: Throwable) { /* best-effort */ }
+        }
+    }
+
+    fun clearErrorHighlightIfActive() {
+        if (!errorHighlightActive) return
+        errorHighlightActive = false
+        try {
+            editor.colorScheme.setColor(
+                EditorColorScheme.SELECTED_TEXT_BACKGROUND,
+                activity.getColor(R.color.selection_overlay)
+            )
+        } catch (t: Throwable) { /* best-effort */ }
+    }
+
+    fun showEditorSettingsDialog() {
+        val dialogBinding = DialogEditorSettingsBinding.inflate(activity.layoutInflater)
+
+        dialogBinding.seekFontSize.progress = (editorSettings.fontSize - 10f).toInt()
+        dialogBinding.seekTabSize.progress = editorSettings.tabSize - 2
+
+        dialogBinding.seekFontSize.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                val newSize = (10 + progress).toFloat()
+                editorSettings.fontSize = newSize
+                applyFontSize(newSize)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        dialogBinding.seekTabSize.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                val newTabSize = 2 + progress
+                editorSettings.tabSize = newTabSize
+                applyTabSize(newTabSize)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        AlertDialog.Builder(activity)
+            .setTitle("Editor Settings")
+            .setView(dialogBinding.root)
+            .setPositiveButton("Done", null)
+            .show()
+    }
+
+    private fun applyFontSize(size: Float) {
+        try { editor.setTextSize(size) } catch (t: Throwable) { onError("Font size change failed", t) }
+    }
+
+    private fun applyTabSize(size: Int) {
+        try { editor.tabWidth = size } catch (t: Throwable) { onError("Tab size change failed", t) }
+    }
+
+    private fun applyVisualPolish() {
+        try { editor.setCursorWidth(activity.resources.displayMetrics.density * 2.5f) } catch (t: Throwable) { }
+    }
+
+    private fun setupPythonToolbar() {
+        val tb = binding.pythonToolbar
+        val insert: (String) -> Unit = { s -> editor.commitText(s) }
+
+        tb.tbUndo.setOnClickListener { if (editor.canUndo()) editor.undo() }
+        tb.tbRedo.setOnClickListener { if (editor.canRedo()) editor.redo() }
+        tb.tbIndent.setOnClickListener { insert("    ") }
+        tb.tbOutdent.setOnClickListener { removeOneIndentLevel() }
+        tb.tbParenOpen.setOnClickListener { insert("(") }
+        tb.tbParenClose.setOnClickListener { insert(")") }
+        tb.tbBracketOpen.setOnClickListener { insert("[") }
+        tb.tbBracketClose.setOnClickListener { insert("]") }
+        tb.tbBraceOpen.setOnClickListener { insert("{") }
+        tb.tbBraceClose.setOnClickListener { insert("}") }
+        tb.tbSquote.setOnClickListener { insert("'") }
+        tb.tbDquote.setOnClickListener { insert("\"") }
+        tb.tbColon.setOnClickListener { insert(":") }
+        tb.tbUnderscore.setOnClickListener { insert("_") }
+        tb.tbHash.setOnClickListener { insert("#") }
+        tb.tbEq.setOnClickListener { insert("=") }
+        tb.tbEqeq.setOnClickListener { insert("==") }
+        tb.tbNeq.setOnClickListener { insert("!=") }
+        tb.tbLt.setOnClickListener { insert("<") }
+        tb.tbGt.setOnClickListener { insert(">") }
+        tb.tbLe.setOnClickListener { insert("<=") }
+        tb.tbGe.setOnClickListener { insert(">=") }
+        tb.tbPlus.setOnClickListener { insert("+") }
+        tb.tbMinus.setOnClickListener { insert("-") }
+        tb.tbMul.setOnClickListener { insert("*") }
+        tb.tbDiv.setOnClickListener { insert("/") }
+        tb.tbFloordiv.setOnClickListener { insert("//") }
+        tb.tbMod.setOnClickListener { insert("%") }
+        tb.tbPow.setOnClickListener { insert("**") }
+        tb.tbArrow.setOnClickListener { insert("->") }
+        tb.tbAt.setOnClickListener { insert("@") }
+        tb.tbEllipsis.setOnClickListener { insert("...") }
+    }
+
+    private fun removeOneIndentLevel() {
+        val line = editor.cursor.leftLine
+        val col = editor.cursor.leftColumn
+        val lineText = editor.text.getLineString(line)
+        val prefix = lineText.substring(0, col)
+        val trailingSpaces = prefix.takeLastWhile { it == ' ' }.length
+        val toRemove = minOf(trailingSpaces, 4)
+        if (toRemove > 0) editor.text.delete(line, col - toRemove, line, col)
+    }
+
+    private fun setupKeyboardAwareToolbar() {
+        val rootView = binding.root
+        rootView.viewTreeObserver.addOnGlobalLayoutListener {
+            val visibleFrame = Rect()
+            rootView.getWindowVisibleDisplayFrame(visibleFrame)
+            val screenHeight = rootView.rootView.height
+            if (screenHeight == 0) return@addOnGlobalLayoutListener
+            val heightDiff = screenHeight - visibleFrame.bottom
+            isKeyboardVisible = heightDiff > screenHeight * 0.15
+            binding.pythonToolbar.root.visibility = if (isKeyboardVisible) View.VISIBLE else View.GONE
+        }
+    }
+
+    fun isKeyboardCurrentlyVisible(): Boolean = isKeyboardVisible
 }

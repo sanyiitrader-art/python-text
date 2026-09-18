@@ -1,0 +1,327 @@
+package com.pyedit.app
+
+import android.content.Intent
+import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import android.view.View
+import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import androidx.documentfile.provider.DocumentFile
+import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
+import com.pyedit.app.databinding.ActivityMainBinding
+import com.pyedit.app.databinding.DialogSaveAsBinding
+import com.pyedit.app.databinding.DialogUnsavedExitBinding
+import kotlinx.coroutines.launch
+
+/**
+ * Owns workspace/file state: the Root Folder and Recent lists (both the
+ * drawer's and the main plate's), open/save/save-as, autosave scheduling,
+ * crash recovery, and the unsaved-exit dialog. Talks to the editor only
+ * through EditorController's small public surface (getText/loadText),
+ * never touches CodeEditor directly.
+ */
+class FileController(
+    private val activity: AppCompatActivity,
+    private val binding: ActivityMainBinding,
+    private val workspace: WorkspaceManager,
+    private val recentStore: RecentFilesStore,
+    private val editorController: EditorController,
+    private val onStateChanged: (hasFileOpen: Boolean, isDirty: Boolean, displayName: String) -> Unit
+) {
+    var rootTreeUri: Uri? = null
+        private set
+    var currentFileDoc: DocumentFile? = null
+        private set
+    var isDirty: Boolean = false
+        private set
+    var hasFileOpen: Boolean = false
+        private set
+    var autosaveEnabled: Boolean = false
+
+    private lateinit var fileTreeAdapter: FileTreeAdapter
+    private lateinit var mainBrowseAdapter: FileTreeAdapter
+    private lateinit var recentFilesAdapter: RecentFilesAdapter
+    private lateinit var mainRecentFilesAdapter: RecentFilesAdapter
+
+    private val autosaveHandler = Handler(Looper.getMainLooper())
+    private var autosaveRunnable: Runnable? = null
+    private val autosaveDelayMs = 1200L
+
+    fun setup() {
+        editorController.onContentChanged { markDirty() }
+        setupDrawerLists()
+        setupMainWorkspaceView()
+    }
+
+    suspend fun init() {
+        autosaveEnabled = recentStore.isAutosaveEnabled()
+        restoreLastSessionOrDefault()
+    }
+
+    private fun markDirty() {
+        if (!isDirty) {
+            isDirty = true
+            notifyState()
+        }
+        scheduleAutosaveAndRecovery()
+    }
+
+    private fun scheduleAutosaveAndRecovery() {
+        autosaveRunnable?.let { autosaveHandler.removeCallbacks(it) }
+        val runnable = Runnable {
+            val doc = currentFileDoc ?: return@Runnable
+            val content = editorController.getText()
+            workspace.writeRecovery(doc, content)
+            if (autosaveEnabled) {
+                workspace.saveFile(doc, content)
+                workspace.clearRecovery(doc)
+                isDirty = false
+                notifyState()
+            }
+        }
+        autosaveRunnable = runnable
+        autosaveHandler.postDelayed(runnable, autosaveDelayMs)
+    }
+
+    private fun notifyState() {
+        val name = currentFileDoc?.name ?: activity.getString(R.string.untitled_file)
+        val display = if (isDirty) "$name *" else name
+        onStateChanged(hasFileOpen, isDirty, display)
+    }
+
+    fun getDisplayFileName(): String = currentFileDoc?.name ?: "untitled.py"
+
+    fun onFolderPicked(uri: Uri) {
+        activity.contentResolver.takePersistableUriPermission(
+            uri,
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        )
+        rootTreeUri = uri
+        activity.lifecycleScope.launch { recentStore.setRootTreeUri(uri.toString()) }
+        refreshFolderBrowseViews()
+        showFolderBrowseState()
+    }
+
+    fun onSingleFilePicked(uri: Uri) {
+        activity.contentResolver.takePersistableUriPermission(
+            uri,
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        )
+        val doc = DocumentFile.fromSingleUri(activity, uri) ?: return
+        openFile(doc)
+    }
+
+    private fun refreshFolderBrowseViews() {
+        val uri = rootTreeUri ?: return
+        val tree = workspace.buildTree(uri)
+        val hasPython = workspace.hasAnyPythonFile(tree)
+
+        fileTreeAdapter.submitTree(tree)
+        binding.drawerContent.tvDrawerNoPythonFiles.visibility = if (hasPython) View.GONE else View.VISIBLE
+
+        mainBrowseAdapter.submitTree(tree)
+        binding.mainWorkspaceView.tvNoPythonFilesMain.visibility = if (hasPython) View.GONE else View.VISIBLE
+    }
+
+    private fun showFolderBrowseState() {
+        binding.mainWorkspaceView.groupEmptyState.visibility = View.GONE
+        binding.mainWorkspaceView.groupFolderBrowse.visibility = View.VISIBLE
+    }
+
+    fun showEmptyState() {
+        binding.mainWorkspaceView.root.visibility = View.VISIBLE
+        binding.editorContainer.visibility = View.GONE
+        if (rootTreeUri == null) {
+            binding.mainWorkspaceView.groupEmptyState.visibility = View.VISIBLE
+            binding.mainWorkspaceView.groupFolderBrowse.visibility = View.GONE
+        } else {
+            binding.mainWorkspaceView.groupEmptyState.visibility = View.GONE
+            binding.mainWorkspaceView.groupFolderBrowse.visibility = View.VISIBLE
+        }
+    }
+
+    fun showEditorState() {
+        binding.mainWorkspaceView.root.visibility = View.GONE
+        binding.editorContainer.visibility = View.VISIBLE
+    }
+
+    private fun setupMainWorkspaceView() {
+        mainBrowseAdapter = FileTreeAdapter { leaf -> openFile(leaf.doc) }
+        binding.mainWorkspaceView.rvFolderBrowseMain.layoutManager = LinearLayoutManager(activity)
+        binding.mainWorkspaceView.rvFolderBrowseMain.adapter = mainBrowseAdapter
+
+        mainRecentFilesAdapter = RecentFilesAdapter { uriString ->
+            DocumentFile.fromSingleUri(activity, Uri.parse(uriString))?.let { openFile(it) }
+        }
+        binding.mainWorkspaceView.rvRecentFilesMain.layoutManager = LinearLayoutManager(activity)
+        binding.mainWorkspaceView.rvRecentFilesMain.adapter = mainRecentFilesAdapter
+
+        activity.lifecycleScope.launch {
+            recentStore.recentFiles.collect { list -> mainRecentFilesAdapter.submitList(list) }
+        }
+    }
+
+    fun bindOpenButtons(launchOpenFolder: () -> Unit, launchOpenFile: () -> Unit) {
+        binding.mainWorkspaceView.btnOpenFolder.setOnClickListener { launchOpenFolder() }
+        binding.mainWorkspaceView.btnOpenFile.setOnClickListener { launchOpenFile() }
+    }
+
+    fun openFile(doc: DocumentFile) {
+        checkUnsavedThenRun {
+            val content = workspace.readFile(doc)
+            editorController.loadText(content)
+            currentFileDoc = doc
+            isDirty = false
+            hasFileOpen = true
+            notifyState()
+            showEditorState()
+            binding.outputPanel.root.visibility = View.GONE
+            editorController.clearErrorHighlightIfActive()
+            activity.lifecycleScope.launch {
+                recentStore.addRecent(doc.uri.toString(), doc.name ?: "untitled.py")
+                recentStore.setLastActiveFile(doc.uri.toString())
+            }
+            binding.drawerLayout.closeDrawers()
+            checkRecoveryFor(doc)
+        }
+    }
+
+    private fun checkUnsavedThenRun(action: () -> Unit) {
+        if (!isDirty) { action(); return }
+        showUnsavedExitDialog(
+            onSave = { saveCurrentFile { action() } },
+            onDiscard = { isDirty = false; action() }
+        )
+    }
+
+    fun saveCurrentFile(onDone: () -> Unit = {}) {
+        val doc = currentFileDoc
+        if (doc == null) { showSaveAsDialog(onDone); return }
+        workspace.saveFile(doc, editorController.getText())
+        workspace.clearRecovery(doc)
+        isDirty = false
+        notifyState()
+        onDone()
+    }
+
+    fun showSaveAsDialog(onDone: () -> Unit = {}) {
+        val uri = rootTreeUri
+        if (uri == null) {
+            Toast.makeText(activity, "Open a folder first to Save As into it", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val dialogBinding = DialogSaveAsBinding.inflate(activity.layoutInflater)
+        AlertDialog.Builder(activity)
+            .setTitle("Save As")
+            .setView(dialogBinding.root)
+            .setPositiveButton("Save") { _, _ ->
+                val name = dialogBinding.editFilename.text.toString().trim()
+                if (name.isNotEmpty()) {
+                    val newDoc = workspace.createNewFileInTree(uri, name)
+                    if (newDoc != null) {
+                        workspace.saveFile(newDoc, editorController.getText())
+                        currentFileDoc = newDoc
+                        isDirty = false
+                        hasFileOpen = true
+                        notifyState()
+                        activity.lifecycleScope.launch {
+                            recentStore.addRecent(newDoc.uri.toString(), newDoc.name ?: name)
+                            recentStore.setLastActiveFile(newDoc.uri.toString())
+                        }
+                        refreshFolderBrowseViews()
+                        onDone()
+                    }
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showUnsavedExitDialog(onSave: () -> Unit, onDiscard: () -> Unit) {
+        val dialogBinding = DialogUnsavedExitBinding.inflate(activity.layoutInflater)
+        val dialog = AlertDialog.Builder(activity).setView(dialogBinding.root).setCancelable(true).create()
+        dialogBinding.btnCancel.setOnClickListener { dialog.dismiss() }
+        dialogBinding.btnSave.setOnClickListener { dialog.dismiss(); onSave() }
+        dialogBinding.btnDiscard.setOnClickListener { dialog.dismiss(); onDiscard() }
+        dialog.show()
+    }
+
+    fun checkUnsavedThenExit(proceed: () -> Unit) {
+        if (isDirty) {
+            showUnsavedExitDialog(
+                onSave = { saveCurrentFile { proceed() } },
+                onDiscard = { proceed() }
+            )
+        } else {
+            proceed()
+        }
+    }
+
+    private fun checkRecoveryFor(doc: DocumentFile) {
+        val recoveryContent = workspace.readRecoveryIfDifferent(doc) ?: return
+        AlertDialog.Builder(activity)
+            .setTitle("Unsaved work recovered")
+            .setMessage("A previous session for ${doc.name} has unsaved changes. Restore them?")
+            .setPositiveButton("Restore") { _, _ ->
+                editorController.loadText(recoveryContent)
+                isDirty = true
+                notifyState()
+            }
+            .setNegativeButton("Discard") { _, _ -> workspace.clearRecovery(doc) }
+            .show()
+    }
+
+    private suspend fun restoreLastSessionOrDefault() {
+        val savedRootUri = recentStore.getRootTreeUri()?.let { Uri.parse(it) }
+        if (savedRootUri != null) {
+            rootTreeUri = savedRootUri
+            refreshFolderBrowseViews()
+        }
+
+        val lastUriString = recentStore.getLastActiveFile()
+        val doc = lastUriString?.let { DocumentFile.fromSingleUri(activity, Uri.parse(it)) }
+            ?.takeIf { it.exists() }
+
+        if (doc != null) {
+            val content = workspace.readFile(doc)
+            editorController.loadText(content)
+            currentFileDoc = doc
+            isDirty = false
+            hasFileOpen = true
+            notifyState()
+            showEditorState()
+            checkRecoveryFor(doc)
+        } else {
+            notifyState()
+            showEmptyState()
+        }
+    }
+
+    private fun setupDrawerLists() {
+        fileTreeAdapter = FileTreeAdapter { leaf -> openFile(leaf.doc) }
+        binding.drawerContent.rvFileTree.layoutManager = LinearLayoutManager(activity)
+        binding.drawerContent.rvFileTree.adapter = fileTreeAdapter
+
+        recentFilesAdapter = RecentFilesAdapter { uriString ->
+            DocumentFile.fromSingleUri(activity, Uri.parse(uriString))?.let { openFile(it) }
+        }
+        binding.drawerContent.rvRecentFiles.layoutManager = LinearLayoutManager(activity)
+        binding.drawerContent.rvRecentFiles.adapter = recentFilesAdapter
+
+        activity.lifecycleScope.launch {
+            recentStore.recentFiles.collect { list -> recentFilesAdapter.submitList(list) }
+        }
+
+        binding.drawerContent.tvClearRecent.setOnClickListener {
+            activity.lifecycleScope.launch { recentStore.clearRecent() }
+        }
+    }
+
+    fun setAutosaveEnabled(enabled: Boolean) {
+        autosaveEnabled = enabled
+        activity.lifecycleScope.launch { recentStore.setAutosaveEnabled(enabled) }
+    }
+}

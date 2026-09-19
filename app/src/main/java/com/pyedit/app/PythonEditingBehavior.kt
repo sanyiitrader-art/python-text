@@ -12,16 +12,6 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
 
     private var isProgrammaticEdit = false
 
-    // FIX: previously tracked a countdown ("remainingLevels") that got
-    // exhausted after one correction, forgetting the rest of that line's
-    // smart-indented whitespace was still smart. Now this just remembers
-    // "this line's leading whitespace, up to this length, is smart" —
-    // it persists across as many backspaces as needed until the line's
-    // indentation reaches zero, whether it was built by one Enter, several
-    // nested ones, or toolbar taps.
-    private data class SmartRegion(val line: Int, var endColumn: Int)
-    private var smartRegion: SmartRegion? = null
-
     fun attach() {
         editor.text.addContentListener(this)
     }
@@ -36,8 +26,10 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
     ) {
         if (isProgrammaticEdit) return
 
+        // Toolbar Indent button still inserts its 4 spaces exactly as
+        // before — the ONLY thing removed here is the now-unnecessary
+        // smart-region bookkeeping that was the source of both bugs.
         if (insertedContent.length == 4 && insertedContent.all { it == ' ' }) {
-            markSmartRegion(endLine, endColumn)
             return
         }
 
@@ -97,23 +89,6 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
             try {
                 editor.setSelection(newLineIndex, targetIndent.length)
             } catch (t: Throwable) { /* best-effort cursor placement */ }
-
-            // Whole resulting indentation on this line is smart now,
-            // regardless of what portion was added just this keystroke.
-            if (targetIndent.isNotEmpty()) {
-                markSmartRegion(newLineIndex, targetIndent.length)
-            } else if (smartRegion?.line == newLineIndex) {
-                smartRegion = null
-            }
-        }
-    }
-
-    private fun markSmartRegion(line: Int, endColumn: Int) {
-        val existing = smartRegion
-        if (existing != null && existing.line == line) {
-            existing.endColumn = endColumn
-        } else {
-            smartRegion = SmartRegion(line, endColumn)
         }
     }
 
@@ -132,6 +107,9 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
         if (isProgrammaticEdit) return
         val deletedText = deletedContent.toString()
 
+        // Cross-line: keyboard merged an indentation-only line into the
+        // previous one in one event. Split it back apart so the first
+        // backspace only cancels one indent level, never merges outright.
         if (startLine != endLine) {
             if (deletedText.length <= 1) return
             if (deletedText[0] != '\n') return
@@ -139,57 +117,43 @@ class PythonEditingBehavior(private val editor: CodeEditor) : ContentListener {
             if (wsAfterNewline.any { it != ' ' }) return
             if (wsAfterNewline.isEmpty()) return
 
-            val region = smartRegion
-            val isTrackedRegion = region != null &&
-                region.line == endLine &&
-                region.endColumn == wsAfterNewline.length
-            val stepSize = if (isTrackedRegion) 4 else 1
-            val remaining = maxOf(0, wsAfterNewline.length - stepSize)
-
+            val remaining = snapDownOneLevel(wsAfterNewline.length)
             programmaticInsert(content, startLine, startColumn, "\n" + " ".repeat(remaining))
             try {
                 editor.setSelection(startLine + 1, remaining)
-            } catch (t: Throwable) { /* best-effort cursor placement */ }
-
-            if (isTrackedRegion) {
-                if (remaining <= 0) smartRegion = null
-                else region!!.endColumn = remaining
-            }
+            } catch (t: Throwable) { /* best-effort */ }
             return
         }
 
-        if (deletedText.isEmpty() || deletedText.any { it != ' ' }) {
-            if (smartRegion?.line == startLine) smartRegion = null
-            return
-        }
-
-        val region = smartRegion
-        val regionMatches = region != null &&
-            region.line == startLine &&
-            region.endColumn == startColumn + deletedText.length
-
-        if (regionMatches) {
-            val desiredNewEnd = maxOf(0, region!!.endColumn - 4)
-            val actualNewEnd = startColumn
-            val diff = desiredNewEnd - actualNewEnd
-            if (diff > 0) programmaticInsert(content, startLine, startColumn, " ".repeat(diff))
-            else if (diff < 0) programmaticDelete(content, startLine, desiredNewEnd, actualNewEnd)
-
-            if (desiredNewEnd <= 0) smartRegion = null
-            else region.endColumn = desiredNewEnd
-            return
-        }
+        // Same-line: this is the actual fix. No history/origin tracking
+        // at all — purely "is the cursor currently inside the leading
+        // whitespace of this line?" If the deleted text was space(s) AND
+        // everything still remaining before the cursor is also just
+        // spaces, we're in the leading-indent region regardless of
+        // whether that whitespace came from a colon-triggered auto-
+        // indent three lines ago, a continued (non-colon) line, or the
+        // toolbar button — all of which were exactly the cases the old
+        // per-line tracking lost.
+        if (deletedText.isEmpty() || deletedText.any { it != ' ' }) return
 
         val lineText = content.getLineString(startLine)
-        val isLeading = lineText.substring(0, startColumn).all { it == ' ' }
-        if (!isLeading) return
+        val prefixBeforeCursor = lineText.substring(0, startColumn)
+        if (prefixBeforeCursor.any { it != ' ' }) return // real text before cursor — leave default behavior alone
 
         val originalLength = startColumn + deletedText.length
-        val desiredRemaining = maxOf(0, originalLength - 1)
+        val desiredRemaining = snapDownOneLevel(originalLength)
         val actualRemaining = startColumn
         val diff = desiredRemaining - actualRemaining
         if (diff > 0) programmaticInsert(content, startLine, startColumn, " ".repeat(diff))
         else if (diff < 0) programmaticDelete(content, startLine, desiredRemaining, actualRemaining)
+    }
+
+    /** Removes one 4-space level, snapping down to the nearest lower
+     * 4-boundary if the current length isn't already a clean multiple
+     * (e.g. 6 -> 4, not 2), and never going below 0. */
+    private fun snapDownOneLevel(currentLength: Int): Int {
+        if (currentLength <= 4) return 0
+        return if (currentLength % 4 == 0) currentLength - 4 else (currentLength / 4) * 4
     }
 
     private fun programmaticInsert(content: Content, line: Int, column: Int, text: String) {

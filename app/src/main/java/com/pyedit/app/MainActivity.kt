@@ -16,12 +16,6 @@ import kotlinx.coroutines.launch
 import java.io.PrintWriter
 import java.io.StringWriter
 
-/**
- * Thin coordinator: inflates the layout, creates the three controllers
- * below, wires their callbacks together, and owns the Activity lifecycle.
- * All actual editor/file/execution logic lives in EditorController,
- * FileController, and ExecutionUiController respectively.
- */
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
@@ -143,7 +137,7 @@ class MainActivity : AppCompatActivity() {
 
         popupBinding.checkboxAutosave.isChecked = fileController.autosaveEnabled
         popupBinding.checkboxAutosave.setOnCheckedChangeListener { _, checked ->
-            fileController.setAutosaveEnabled(checked)
+            fileController.updateAutosaveEnabled(checked)
         }
 
         if (hasFileOpen) {

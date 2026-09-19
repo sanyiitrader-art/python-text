@@ -16,13 +16,6 @@ import com.pyedit.app.databinding.DialogSaveAsBinding
 import com.pyedit.app.databinding.DialogUnsavedExitBinding
 import kotlinx.coroutines.launch
 
-/**
- * Owns workspace/file state: the Root Folder and Recent lists (both the
- * drawer's and the main plate's), open/save/save-as, autosave scheduling,
- * crash recovery, and the unsaved-exit dialog. Talks to the editor only
- * through EditorController's small public surface (getText/loadText),
- * never touches CodeEditor directly.
- */
 class FileController(
     private val activity: AppCompatActivity,
     private val binding: ActivityMainBinding,
@@ -40,6 +33,7 @@ class FileController(
     var hasFileOpen: Boolean = false
         private set
     var autosaveEnabled: Boolean = false
+        private set
 
     private lateinit var fileTreeAdapter: FileTreeAdapter
     private lateinit var mainBrowseAdapter: FileTreeAdapter
@@ -320,7 +314,11 @@ class FileController(
         }
     }
 
-    fun setAutosaveEnabled(enabled: Boolean) {
+    /** Renamed from setAutosaveEnabled: that name clashed at the JVM
+     * bytecode level with the compiler-generated setter for the
+     * `autosaveEnabled` property above (both compile to
+     * setAutosaveEnabled(Z)V), which is what failed the build. */
+    fun updateAutosaveEnabled(enabled: Boolean) {
         autosaveEnabled = enabled
         activity.lifecycleScope.launch { recentStore.setAutosaveEnabled(enabled) }
     }

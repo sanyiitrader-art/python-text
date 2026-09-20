@@ -5,13 +5,6 @@ import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import java.security.MessageDigest
 
-/**
- * Rebuilt on Storage Access Framework (DocumentFile / content:// URIs)
- * instead of plain java.io.File, so the user can pick ANY folder or file
- * on the device via the system picker — not just browse a fixed
- * app-private directory. The root "workspace" is now whatever folder the
- * user picked with "Open Folder", persisted as a tree URI.
- */
 class WorkspaceManager(private val context: Context) {
 
     sealed class FileNode {
@@ -30,7 +23,6 @@ class WorkspaceManager(private val context: Context) {
         ) : FileNode()
     }
 
-    /** Spec's V1 restriction: only .py files (and folders) are shown. */
     fun buildTree(rootUri: Uri): List<FileNode> {
         val root = DocumentFile.fromTreeUri(context, rootUri) ?: return emptyList()
         return buildTreeFrom(root)
@@ -53,13 +45,17 @@ class WorkspaceManager(private val context: Context) {
             }
     }
 
-    /** True if the given tree contains at least one .py file anywhere. */
     fun hasAnyPythonFile(nodes: List<FileNode>): Boolean = nodes.any { node ->
         when (node) {
             is FileNode.Leaf -> true
             is FileNode.Folder -> hasAnyPythonFile(node.children)
         }
     }
+
+    /** Display name of the folder a tree URI points to (for the Root
+     * Folder row's middle label). */
+    fun folderDisplayName(rootUri: Uri): String =
+        DocumentFile.fromTreeUri(context, rootUri)?.name ?: ""
 
     fun readFile(doc: DocumentFile): String {
         context.contentResolver.openInputStream(doc.uri)?.use { input ->
@@ -68,14 +64,6 @@ class WorkspaceManager(private val context: Context) {
         return ""
     }
 
-    /**
-     * "wt" (write-truncate) mode is used rather than a temp-file+rename
-     * atomic pattern (spec's original atomic-write intent), because
-     * arbitrary SAF providers don't uniformly support that pattern the
-     * way a plain filesystem does. Most providers still handle a single
-     * openOutputStream write safely; full cross-provider atomicity isn't
-     * guaranteed here the way it was for the old app-private path.
-     */
     fun saveFile(doc: DocumentFile, content: String) {
         context.contentResolver.openOutputStream(doc.uri, "wt")?.use { output ->
             output.write(content.toByteArray())
@@ -88,11 +76,22 @@ class WorkspaceManager(private val context: Context) {
         return root.findFile(fileName) ?: root.createFile("text/x-python", fileName)
     }
 
-    // --- Crash-safe recovery -------------------------------------------
-    // Kept in app-private cache storage, keyed by a hash of the file's
-    // URI, rather than attempting hidden sibling files inside whatever
-    // arbitrary folder the user picked (SAF providers vary in whether
-    // they support that reliably).
+    /** Rename via SAF's DocumentFile.renameTo — returns false if the
+     * provider rejects it (e.g. a name collision). */
+    fun renameFile(doc: DocumentFile, newName: String): Boolean {
+        val fileName = if (newName.endsWith(".py")) newName else "$newName.py"
+        return try {
+            doc.renameTo(fileName)
+        } catch (t: Throwable) {
+            false
+        }
+    }
+
+    fun deleteFile(doc: DocumentFile): Boolean = try {
+        doc.delete()
+    } catch (t: Throwable) {
+        false
+    }
 
     private fun recoveryKeyFor(uri: Uri): String {
         val digest = MessageDigest.getInstance("MD5").digest(uri.toString().toByteArray())

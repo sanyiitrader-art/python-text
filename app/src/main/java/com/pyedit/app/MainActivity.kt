@@ -124,6 +124,18 @@ class MainActivity : AppCompatActivity() {
         )
         popup.elevation = 8f
 
+        // Open File / Open Folder work with or without a file already
+        // open, so they're wired unconditionally, outside the
+        // hasFileOpen-gated block below.
+        popupBinding.menuItemOpenFile.setOnClickListener {
+            popup.dismiss()
+            openFileLauncher.launch(arrayOf("*/*"))
+        }
+        popupBinding.menuItemOpenFolder.setOnClickListener {
+            popup.dismiss()
+            openFolderLauncher.launch(null)
+        }
+
         val hasFileOpen = fileController.hasFileOpen
         val items = listOf(
             popupBinding.menuItemSave, popupBinding.menuItemSaveAs,

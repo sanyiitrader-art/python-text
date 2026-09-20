@@ -6,37 +6,13 @@
     android:orientation="vertical"
     android:background="@color/popup_background">
 
-    <!-- New persistent gutter bar at the very top of the drawer, with a
-         disabled "+" (add file) button reserved for a future feature. -->
-    <LinearLayout
+    <!-- Persistent top gutter bar — the "+" that used to live here has
+         moved down to the Root Folder row, per request. -->
+    <View
         android:layout_width="match_parent"
         android:layout_height="44dp"
-        android:orientation="horizontal"
-        android:background="@color/topbar_background"
-        android:gravity="center_vertical"
-        android:paddingStart="12dp"
-        android:paddingEnd="4dp">
+        android:background="@color/topbar_background" />
 
-        <View
-            android:layout_width="0dp"
-            android:layout_height="1dp"
-            android:layout_weight="1" />
-
-        <ImageButton
-            android:id="@+id/btn_drawer_add"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:src="@drawable/ic_add"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:enabled="false"
-            android:alpha="0.35"
-            app:tint="@color/text_normal"
-            android:contentDescription="Add" />
-
-    </LinearLayout>
-
-    <!-- Everything below is pulled down slightly, separating it visually
-         from the new gutter bar above. -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
@@ -90,20 +66,50 @@
             android:layout_marginTop="8dp"
             android:background="@color/border_divider" />
 
-        <!-- Mirrors whatever folder is currently picked via the main
-             plate's Open Folder button — no separate picker here. -->
-        <TextView
-            android:id="@+id/tv_root_folder_header"
+        <!-- Root Folder row: label on the left, current folder name in
+             the middle, "+" (new file) on the right. -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/drawer_root_folder"
-            android:textStyle="bold"
-            android:textColor="@color/text_normal"
-            android:textSize="15sp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
             android:paddingStart="16dp"
-            android:paddingEnd="16dp"
+            android:paddingEnd="8dp"
             android:paddingTop="16dp"
-            android:paddingBottom="8dp" />
+            android:paddingBottom="8dp">
+
+            <TextView
+                android:id="@+id/tv_root_folder_header"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/drawer_root_folder"
+                android:textStyle="bold"
+                android:textColor="@color/text_normal"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/tv_root_folder_name"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:layout_marginEnd="8dp"
+                android:gravity="center"
+                android:singleLine="true"
+                android:ellipsize="middle"
+                android:textColor="@color/text_comment"
+                android:textSize="13sp" />
+
+            <ImageButton
+                android:id="@+id/btn_drawer_add"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:src="@drawable/ic_add"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                app:tint="@color/mint_primary"
+                android:contentDescription="New file" />
+
+        </LinearLayout>
 
         <TextView
             android:id="@+id/tv_drawer_no_python_files"

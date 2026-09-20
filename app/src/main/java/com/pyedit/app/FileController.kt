@@ -5,6 +5,8 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.view.View
+import android.view.ViewGroup
+import android.widget.PopupWindow
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -14,6 +16,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import com.pyedit.app.databinding.ActivityMainBinding
 import com.pyedit.app.databinding.DialogSaveAsBinding
 import com.pyedit.app.databinding.DialogUnsavedExitBinding
+import com.pyedit.app.databinding.PopupFileActionsBinding
 import kotlinx.coroutines.launch
 
 class FileController(
@@ -48,6 +51,14 @@ class FileController(
         editorController.onContentChanged { markDirty() }
         setupDrawerLists()
         setupMainWorkspaceView()
+
+        binding.drawerContent.btnDrawerAdd.setOnClickListener {
+            if (rootTreeUri == null) {
+                Toast.makeText(activity, "Open a folder first to create a file in it", Toast.LENGTH_SHORT).show()
+            } else {
+                fileTreeAdapter.startCreatingNewFile()
+            }
+        }
     }
 
     suspend fun init() {
@@ -113,6 +124,8 @@ class FileController(
         val tree = workspace.buildTree(uri)
         val hasPython = workspace.hasAnyPythonFile(tree)
 
+        binding.drawerContent.tvRootFolderName.text = workspace.folderDisplayName(uri)
+
         fileTreeAdapter.submitTree(tree)
         binding.drawerContent.tvDrawerNoPythonFiles.visibility = if (hasPython) View.GONE else View.VISIBLE
 
@@ -143,7 +156,11 @@ class FileController(
     }
 
     private fun setupMainWorkspaceView() {
-        mainBrowseAdapter = FileTreeAdapter { leaf -> openFile(leaf.doc) }
+        mainBrowseAdapter = FileTreeAdapter(
+            onFileClick = { leaf -> openFile(leaf.doc) },
+            onFileLongPress = { _, _, _ -> /* main plate list: no rename/delete, per spec */ },
+            onNameConfirmed = { _, _ -> /* unused here */ }
+        )
         binding.mainWorkspaceView.rvFolderBrowseMain.layoutManager = LinearLayoutManager(activity)
         binding.mainWorkspaceView.rvFolderBrowseMain.adapter = mainBrowseAdapter
 
@@ -294,8 +311,14 @@ class FileController(
         }
     }
 
+    // --- New this round: inline create/rename + long-press rename/delete ---
+
     private fun setupDrawerLists() {
-        fileTreeAdapter = FileTreeAdapter { leaf -> openFile(leaf.doc) }
+        fileTreeAdapter = FileTreeAdapter(
+            onFileClick = { leaf -> openFile(leaf.doc) },
+            onFileLongPress = { leaf, depth, anchor -> showFileActionsPopup(leaf, depth, anchor) },
+            onNameConfirmed = { existing, newName -> handleNameConfirmed(existing, newName) }
+        )
         binding.drawerContent.rvFileTree.layoutManager = LinearLayoutManager(activity)
         binding.drawerContent.rvFileTree.adapter = fileTreeAdapter
 
@@ -314,10 +337,68 @@ class FileController(
         }
     }
 
-    /** Renamed from setAutosaveEnabled: that name clashed at the JVM
-     * bytecode level with the compiler-generated setter for the
-     * `autosaveEnabled` property above (both compile to
-     * setAutosaveEnabled(Z)V), which is what failed the build. */
+    private fun handleNameConfirmed(existing: WorkspaceManager.FileNode.Leaf?, newName: String) {
+        val uri = rootTreeUri ?: return
+        if (existing == null) {
+            val newDoc = workspace.createNewFileInTree(uri, newName)
+            if (newDoc == null) {
+                Toast.makeText(activity, "Could not create file", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            val renamed = workspace.renameFile(existing.doc, newName)
+            if (!renamed) {
+                Toast.makeText(activity, "Could not rename file", Toast.LENGTH_SHORT).show()
+            }
+        }
+        fileTreeAdapter.cancelEditing()
+        refreshFolderBrowseViews()
+    }
+
+    private fun showFileActionsPopup(leaf: WorkspaceManager.FileNode.Leaf, depth: Int, anchor: View) {
+        val popupBinding = PopupFileActionsBinding.inflate(activity.layoutInflater)
+        val popup = PopupWindow(
+            popupBinding.root,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            true
+        )
+        popup.elevation = 8f
+
+        popupBinding.actionRename.setOnClickListener {
+            popup.dismiss()
+            fileTreeAdapter.startRenaming(leaf, depth)
+        }
+        popupBinding.actionDelete.setOnClickListener {
+            popup.dismiss()
+            confirmDelete(leaf)
+        }
+
+        popup.showAsDropDown(anchor)
+    }
+
+    private fun confirmDelete(leaf: WorkspaceManager.FileNode.Leaf) {
+        AlertDialog.Builder(activity)
+            .setTitle(activity.getString(R.string.confirm_delete_title))
+            .setMessage(activity.getString(R.string.confirm_delete_message))
+            .setPositiveButton(R.string.action_delete) { _, _ ->
+                val deleted = workspace.deleteFile(leaf.doc)
+                if (deleted) {
+                    if (currentFileDoc?.uri == leaf.doc.uri) {
+                        currentFileDoc = null
+                        hasFileOpen = false
+                        isDirty = false
+                        notifyState()
+                        showEmptyState()
+                    }
+                    refreshFolderBrowseViews()
+                } else {
+                    Toast.makeText(activity, "Could not delete file", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     fun updateAutosaveEnabled(enabled: Boolean) {
         autosaveEnabled = enabled
         activity.lifecycleScope.launch { recentStore.setAutosaveEnabled(enabled) }

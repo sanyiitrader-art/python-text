@@ -30,4 +30,9 @@
     <string name="open_folder">Open Folder</string>
     <string name="open_file">Open File</string>
     <string name="no_python_files">There is no python file inside this folder</string>
+
+    <string name="action_rename">Rename</string>
+    <string name="action_delete">Delete</string>
+    <string name="confirm_delete_title">Delete file</string>
+    <string name="confirm_delete_message">Are you sure?</string>
 </resources>

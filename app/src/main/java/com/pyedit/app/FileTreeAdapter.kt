@@ -1,35 +1,88 @@
 package com.pyedit.app
 
+import android.content.Context
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
 import androidx.recyclerview.widget.RecyclerView
 import com.pyedit.app.databinding.ItemFileNodeBinding
+import com.pyedit.app.databinding.ItemFileNodeEditBinding
 
+/**
+ * Flattens the Root Folder tree into a displayable list with indentation
+ * and collapse/expand (spec §19), plus inline create/rename editing rows
+ * and long-press rename/delete (this round's new feature).
+ */
 class FileTreeAdapter(
-    private val onFileClick: (WorkspaceManager.FileNode.Leaf) -> Unit
-) : RecyclerView.Adapter<FileTreeAdapter.ViewHolder>() {
+    private val onFileClick: (WorkspaceManager.FileNode.Leaf) -> Unit,
+    private val onFileLongPress: (leaf: WorkspaceManager.FileNode.Leaf, depth: Int, anchor: View) -> Unit,
+    private val onNameConfirmed: (existing: WorkspaceManager.FileNode.Leaf?, newName: String) -> Unit
+) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
-    private data class Row(val node: WorkspaceManager.FileNode, val depth: Int)
+    sealed class EditTarget {
+        data class NewFile(val depth: Int) : EditTarget()
+        data class Rename(val leaf: WorkspaceManager.FileNode.Leaf, val depth: Int) : EditTarget()
+    }
+
+    private data class Row(
+        val node: WorkspaceManager.FileNode?,
+        val depth: Int,
+        val editTarget: EditTarget? = null
+    )
 
     private var rootNodes: List<WorkspaceManager.FileNode> = emptyList()
     private val collapsedKeys = mutableSetOf<String>()
     private var flattenedRows: List<Row> = emptyList()
+    private var currentEditTarget: EditTarget? = null
+
+    companion object {
+        private const val TYPE_FOLDER = 0
+        private const val TYPE_LEAF = 1
+        private const val TYPE_EDIT = 2
+    }
 
     fun submitTree(nodes: List<WorkspaceManager.FileNode>) {
         rootNodes = nodes
         recomputeRows()
     }
 
+    fun startCreatingNewFile() {
+        currentEditTarget = EditTarget.NewFile(depth = 0)
+        recomputeRows()
+    }
+
+    fun startRenaming(leaf: WorkspaceManager.FileNode.Leaf, depth: Int) {
+        currentEditTarget = EditTarget.Rename(leaf, depth)
+        recomputeRows()
+    }
+
+    fun cancelEditing() {
+        currentEditTarget = null
+        recomputeRows()
+    }
+
     private fun recomputeRows() {
         val rows = mutableListOf<Row>()
+
+        (currentEditTarget as? EditTarget.NewFile)?.let { rows.add(Row(null, it.depth, it)) }
+        val renameTarget = currentEditTarget as? EditTarget.Rename
+
         fun visit(nodes: List<WorkspaceManager.FileNode>, depth: Int) {
             for (node in nodes) {
-                rows.add(Row(node, depth))
-                if (node is WorkspaceManager.FileNode.Folder &&
-                    node.doc.uri.toString() !in collapsedKeys
-                ) {
-                    visit(node.children, depth + 1)
+                if (renameTarget != null && node === renameTarget.leaf) {
+                    rows.add(Row(node, depth, renameTarget))
+                } else {
+                    rows.add(Row(node, depth))
+                    if (node is WorkspaceManager.FileNode.Folder &&
+                        node.doc.uri.toString() !in collapsedKeys
+                    ) {
+                        visit(node.children, depth + 1)
+                    }
                 }
             }
         }
@@ -38,38 +91,122 @@ class FileTreeAdapter(
         notifyDataSetChanged()
     }
 
-    inner class ViewHolder(val binding: ItemFileNodeBinding) : RecyclerView.ViewHolder(binding.root)
-
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-        val binding = ItemFileNodeBinding.inflate(LayoutInflater.from(parent.context), parent, false)
-        return ViewHolder(binding)
+    override fun getItemViewType(position: Int): Int {
+        val row = flattenedRows[position]
+        return when {
+            row.editTarget != null -> TYPE_EDIT
+            row.node is WorkspaceManager.FileNode.Folder -> TYPE_FOLDER
+            else -> TYPE_LEAF
+        }
     }
 
-    override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        val row = flattenedRows[position]
-        val indentDp = 12 * row.depth
-        val density = holder.binding.root.resources.displayMetrics.density
-        holder.binding.root.setPadding((indentDp * density).toInt(), 0, 0, 0)
+    inner class NodeViewHolder(val binding: ItemFileNodeBinding) : RecyclerView.ViewHolder(binding.root)
+    inner class EditViewHolder(val binding: ItemFileNodeEditBinding) : RecyclerView.ViewHolder(binding.root)
 
-        when (val node = row.node) {
-            is WorkspaceManager.FileNode.Folder -> {
-                // Folders keep the text arrow indicator, no icon —
-                val key = node.doc.uri.toString()
-                val collapsed = key in collapsedKeys
-                val arrow = if (collapsed) ">" else "\u2228"
-                holder.binding.tvNodeName.text = "$arrow ${node.name}"
-                holder.binding.ivNodeIcon.visibility = View.GONE
-                holder.binding.root.setOnClickListener {
-                    if (collapsed) collapsedKeys.remove(key) else collapsedKeys.add(key)
-                    recomputeRows()
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
+        return if (viewType == TYPE_EDIT) {
+            EditViewHolder(ItemFileNodeEditBinding.inflate(LayoutInflater.from(parent.context), parent, false))
+        } else {
+            NodeViewHolder(ItemFileNodeBinding.inflate(LayoutInflater.from(parent.context), parent, false))
+        }
+    }
+
+    override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+        val row = flattenedRows[position]
+        val density = holder.itemView.resources.displayMetrics.density
+        val indentPx = (12 * row.depth * density).toInt()
+
+        when (holder) {
+            is EditViewHolder -> {
+                holder.binding.root.setPadding(indentPx, 0, 0, 0)
+                bindEditRow(holder, row.editTarget!!)
+            }
+            is NodeViewHolder -> {
+                holder.binding.root.setPadding(indentPx, 0, 0, 0)
+                when (val node = row.node) {
+                    is WorkspaceManager.FileNode.Folder -> {
+                        val key = node.doc.uri.toString()
+                        val collapsed = key in collapsedKeys
+                        val arrow = if (collapsed) ">" else "\u2228"
+                        holder.binding.tvNodeName.text = "$arrow ${node.name}"
+                        holder.binding.ivNodeIcon.visibility = View.GONE
+                        holder.binding.root.setOnLongClickListener(null)
+                        holder.binding.root.setOnClickListener {
+                            if (collapsed) collapsedKeys.remove(key) else collapsedKeys.add(key)
+                            recomputeRows()
+                        }
+                    }
+                    is WorkspaceManager.FileNode.Leaf -> {
+                        holder.binding.tvNodeName.text = node.name
+                        holder.binding.ivNodeIcon.visibility = View.VISIBLE
+                        holder.binding.root.setOnClickListener { onFileClick(node) }
+                        holder.binding.root.setOnLongClickListener {
+                            onFileLongPress(node, row.depth, holder.binding.root)
+                            true
+                        }
+                    }
+                    null -> { /* unreachable for NodeViewHolder */ }
                 }
             }
-            is WorkspaceManager.FileNode.Leaf -> {
-                holder.binding.tvNodeName.text = node.name
-                holder.binding.ivNodeIcon.visibility = View.VISIBLE
-                holder.binding.root.setOnClickListener { onFileClick(node) }
+        }
+    }
+
+    private fun bindEditRow(holder: EditViewHolder, target: EditTarget) {
+        val editText = holder.binding.editFileName
+
+        // Clear any listener from a recycled view before rebinding.
+        editText.setOnEditorActionListener(null)
+
+        val initialName = when (target) {
+            is EditTarget.NewFile -> "untitled.py"
+            is EditTarget.Rename -> target.leaf.name
+        }
+        editText.setText(initialName)
+        val selectEnd = initialName.lastIndexOf(".py").let { if (it == -1) initialName.length else it }
+        editText.setSelection(0, selectEnd)
+        applyBorder(editText, isValidName(initialName))
+
+        editText.tag?.let { (it as? TextWatcher)?.let { w -> editText.removeTextChangedListener(w) } }
+        val watcher = object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                applyBorder(editText, isValidName(s?.toString() ?: ""))
             }
         }
+        editText.tag = watcher
+        editText.addTextChangedListener(watcher)
+
+        editText.setOnEditorActionListener { v, actionId, event ->
+            val isEnterAction = actionId == EditorInfo.IME_ACTION_DONE ||
+                (event != null && event.keyCode == android.view.KeyEvent.KEYCODE_ENTER)
+            if (isEnterAction) {
+                val text = v.text.toString()
+                if (isValidName(text)) {
+                    val existing = (target as? EditTarget.Rename)?.leaf
+                    onNameConfirmed(existing, text)
+                    true
+                } else {
+                    true // swallow Enter on invalid name; red border already shown
+                }
+            } else {
+                false
+            }
+        }
+
+        editText.requestFocus()
+        editText.post {
+            val imm = editText.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+            imm.showSoftInput(editText, InputMethodManager.SHOW_IMPLICIT)
+        }
+    }
+
+    private fun isValidName(name: String): Boolean = name.endsWith(".py") && name.length > 3
+
+    private fun applyBorder(editText: EditText, valid: Boolean) {
+        editText.setBackgroundResource(
+            if (valid) R.drawable.edit_row_border_normal else R.drawable.edit_row_border_invalid
+        )
     }
 
     override fun getItemCount(): Int = flattenedRows.size

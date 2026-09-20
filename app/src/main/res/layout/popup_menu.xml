@@ -10,6 +10,8 @@
     android:paddingBottom="8dp">
 
     <TextView android:text="@string/menu_file" style="@style/PopupMenuSectionLabel" />
+    <TextView android:id="@+id/menu_item_open_file" android:text="@string/open_file" style="@style/PopupMenuItem" />
+    <TextView android:id="@+id/menu_item_open_folder" android:text="@string/open_folder" style="@style/PopupMenuItem" />
     <TextView android:id="@+id/menu_item_save" android:text="@string/menu_save" style="@style/PopupMenuItem" />
     <TextView android:id="@+id/menu_item_save_as" android:text="@string/menu_save_as" style="@style/PopupMenuItem" />
 

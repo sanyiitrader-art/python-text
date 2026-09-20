@@ -7,6 +7,7 @@
     android:layout_height="match_parent">
 
     <androidx.constraintlayout.widget.ConstraintLayout
+        android:id="@+id/main_content_root"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:background="@color/editor_background">
@@ -108,10 +109,6 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent" />
 
-        <!-- Step 2 basic output panel: fixed 30% height at the bottom,
-             overlaying the editor (declared after editor_container in
-             this file, so it draws on top). Drag/collapse/full-open
-             gestures are a later, separate step. -->
         <include
             android:id="@+id/output_panel"
             layout="@layout/view_output_panel"

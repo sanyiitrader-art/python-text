@@ -28,21 +28,32 @@ class WorkspaceManager(private val context: Context) {
         return buildTreeFrom(root)
     }
 
+    /**
+     * FIX for item 4: subfolders with no .py file anywhere inside them
+     * (recursively) are now omitted entirely, not just their non-.py
+     * file contents.
+     */
     private fun buildTreeFrom(dir: DocumentFile): List<FileNode> {
         val children = dir.listFiles()
         return children
-            .filter { it.isDirectory || (it.name?.endsWith(".py") == true) }
-            .sortedWith(
-                compareByDescending<DocumentFile> { it.isDirectory }
-                    .thenBy { (it.name ?: "").lowercase() }
-            )
-            .map { child ->
+            .mapNotNull { child ->
                 if (child.isDirectory) {
-                    FileNode.Folder(child, child.name ?: "", buildTreeFrom(child))
-                } else {
+                    val subChildren = buildTreeFrom(child)
+                    if (hasAnyPythonFile(subChildren)) {
+                        FileNode.Folder(child, child.name ?: "", subChildren)
+                    } else {
+                        null
+                    }
+                } else if (child.name?.endsWith(".py") == true) {
                     FileNode.Leaf(child, child.name ?: "")
+                } else {
+                    null
                 }
             }
+            .sortedWith(
+                compareByDescending<FileNode> { it is FileNode.Folder }
+                    .thenBy { it.name.lowercase() }
+            )
     }
 
     fun hasAnyPythonFile(nodes: List<FileNode>): Boolean = nodes.any { node ->
@@ -52,8 +63,6 @@ class WorkspaceManager(private val context: Context) {
         }
     }
 
-    /** Display name of the folder a tree URI points to (for the Root
-     * Folder row's middle label). */
     fun folderDisplayName(rootUri: Uri): String =
         DocumentFile.fromTreeUri(context, rootUri)?.name ?: ""
 
@@ -76,8 +85,6 @@ class WorkspaceManager(private val context: Context) {
         return root.findFile(fileName) ?: root.createFile("text/x-python", fileName)
     }
 
-    /** Rename via SAF's DocumentFile.renameTo — returns false if the
-     * provider rejects it (e.g. a name collision). */
     fun renameFile(doc: DocumentFile, newName: String): Boolean {
         val fileName = if (newName.endsWith(".py")) newName else "$newName.py"
         return try {

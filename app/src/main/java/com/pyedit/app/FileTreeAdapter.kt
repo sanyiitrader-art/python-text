@@ -13,15 +13,12 @@ import androidx.recyclerview.widget.RecyclerView
 import com.pyedit.app.databinding.ItemFileNodeBinding
 import com.pyedit.app.databinding.ItemFileNodeEditBinding
 
-/**
- * Flattens the Root Folder tree into a displayable list with indentation
- * and collapse/expand (spec §19), plus inline create/rename editing rows
- * and long-press rename/delete (this round's new feature).
- */
 class FileTreeAdapter(
     private val onFileClick: (WorkspaceManager.FileNode.Leaf) -> Unit,
     private val onFileLongPress: (leaf: WorkspaceManager.FileNode.Leaf, depth: Int, anchor: View) -> Unit,
-    private val onNameConfirmed: (existing: WorkspaceManager.FileNode.Leaf?, newName: String) -> Unit
+    private val onNameConfirmed: (existing: WorkspaceManager.FileNode.Leaf?, newName: String) -> Unit,
+    private val isNameTaken: (candidateName: String, target: EditTarget) -> Boolean,
+    private val isKeyboardVisible: () -> Boolean
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     sealed class EditTarget {
@@ -39,6 +36,11 @@ class FileTreeAdapter(
     private val collapsedKeys = mutableSetOf<String>()
     private var flattenedRows: List<Row> = emptyList()
     private var currentEditTarget: EditTarget? = null
+
+    // Tracks the currently-bound edit row's EditText, so an external
+    // "tap outside" handler can read its live text and confirm/cancel it —
+    // item 6.
+    private var activeEditText: EditText? = null
 
     companion object {
         private const val TYPE_FOLDER = 0
@@ -63,7 +65,27 @@ class FileTreeAdapter(
 
     fun cancelEditing() {
         currentEditTarget = null
+        activeEditText = null
         recomputeRows()
+    }
+
+    /**
+     * Item 6: called when the user taps outside any interactive element
+     * while a create/rename row is active. Hides the keyboard always;
+     * additionally confirms (saves) the edit if the current text has no
+     * validation error. Returns whether it was saved, purely for callers
+     * that want to know — the keyboard-hide itself is the caller's job.
+     */
+    fun confirmCurrentEditIfValid(): Boolean {
+        val editText = activeEditText ?: return false
+        val target = currentEditTarget ?: return false
+        val text = editText.text.toString()
+        if (isValidExtension(text) && !isNameTaken(text, target)) {
+            val existing = (target as? EditTarget.Rename)?.leaf
+            onNameConfirmed(existing, text)
+            return true
+        }
+        return false
     }
 
     private fun recomputeRows() {
@@ -153,8 +175,8 @@ class FileTreeAdapter(
 
     private fun bindEditRow(holder: EditViewHolder, target: EditTarget) {
         val editText = holder.binding.editFileName
+        activeEditText = editText
 
-        // Clear any listener from a recycled view before rebinding.
         editText.setOnEditorActionListener(null)
 
         val initialName = when (target) {
@@ -164,14 +186,14 @@ class FileTreeAdapter(
         editText.setText(initialName)
         val selectEnd = initialName.lastIndexOf(".py").let { if (it == -1) initialName.length else it }
         editText.setSelection(0, selectEnd)
-        applyBorder(editText, isValidName(initialName))
+        applyBorder(editText, isRowValid(initialName, target))
 
         editText.tag?.let { (it as? TextWatcher)?.let { w -> editText.removeTextChangedListener(w) } }
         val watcher = object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: Editable?) {
-                applyBorder(editText, isValidName(s?.toString() ?: ""))
+                applyBorder(editText, isRowValid(s?.toString() ?: "", target))
             }
         }
         editText.tag = watcher
@@ -182,9 +204,10 @@ class FileTreeAdapter(
                 (event != null && event.keyCode == android.view.KeyEvent.KEYCODE_ENTER)
             if (isEnterAction) {
                 val text = v.text.toString()
-                if (isValidName(text)) {
+                if (isRowValid(text, target)) {
                     val existing = (target as? EditTarget.Rename)?.leaf
                     onNameConfirmed(existing, text)
+                    hideKeyboard(editText)
                     true
                 } else {
                     true // swallow Enter on invalid name; red border already shown
@@ -195,18 +218,34 @@ class FileTreeAdapter(
         }
 
         editText.requestFocus()
-        editText.post {
-            val imm = editText.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-            imm.showSoftInput(editText, InputMethodManager.SHOW_IMPLICIT)
+        // FIX for item 1: only call showSoftInput when the keyboard isn't
+        // already up — calling it while already visible toggles it
+        // closed instead of just moving the input target here.
+        if (!isKeyboardVisible()) {
+            editText.post {
+                val imm = editText.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                imm.showSoftInput(editText, InputMethodManager.SHOW_IMPLICIT)
+            }
         }
     }
 
-    private fun isValidName(name: String): Boolean = name.endsWith(".py") && name.length > 3
+    /** Item 2 + item 5: valid means correct .py extension AND not a name
+     * collision with another file — where "another file" excludes the
+     * file itself during a no-op rename (handled by isNameTaken). */
+    private fun isRowValid(name: String, target: EditTarget): Boolean =
+        isValidExtension(name) && !isNameTaken(name, target)
+
+    private fun isValidExtension(name: String): Boolean = name.endsWith(".py") && name.length > 3
 
     private fun applyBorder(editText: EditText, valid: Boolean) {
         editText.setBackgroundResource(
             if (valid) R.drawable.edit_row_border_normal else R.drawable.edit_row_border_invalid
         )
+    }
+
+    private fun hideKeyboard(view: View) {
+        val imm = view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.hideSoftInputFromWindow(view.windowToken, 0)
     }
 
     override fun getItemCount(): Int = flattenedRows.size

@@ -1,9 +1,11 @@
 package com.pyedit.app
 
+import android.content.Context
 import android.graphics.Rect
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import android.widget.SeekBar
 import androidx.appcompat.app.AlertDialog
@@ -46,9 +48,13 @@ class EditorController(
 
         attachContentBehaviors()
 
+        // Item 6: tapping empty space inside the editor also dismisses
+        // the keyboard now, in addition to clearing the error highlight
+        // it already did.
         editor.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
                 clearErrorHighlightIfActive()
+                hideKeyboard()
             }
             false
         }
@@ -58,6 +64,11 @@ class EditorController(
         applyVisualPolish()
         setupPythonToolbar()
         setupKeyboardAwareToolbar()
+    }
+
+    private fun hideKeyboard() {
+        val imm = activity.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.hideSoftInputFromWindow(editor.windowToken, 0)
     }
 
     fun onContentChanged(callback: () -> Unit) {

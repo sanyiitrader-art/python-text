@@ -1,11 +1,14 @@
 package com.pyedit.app
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.InputMethodManager
 import android.widget.PopupWindow
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -59,6 +62,22 @@ class FileController(
                 fileTreeAdapter.startCreatingNewFile()
             }
         }
+
+        // Item 6: tapping empty space in the drawer (not on any row or
+        // button) dismisses the keyboard and, if a create/rename row is
+        // active with no validation error, saves it.
+        binding.drawerContent.root.setOnTouchListener { _, event ->
+            if (event.action == MotionEvent.ACTION_DOWN) {
+                fileTreeAdapter.confirmCurrentEditIfValid()
+                hideKeyboard()
+            }
+            false
+        }
+    }
+
+    private fun hideKeyboard() {
+        val imm = activity.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.hideSoftInputFromWindow(binding.drawerContent.root.windowToken, 0)
     }
 
     suspend fun init() {
@@ -110,6 +129,14 @@ class FileController(
         showFolderBrowseState()
     }
 
+    /**
+     * Note on item 3: SAF's single-document grant (ACTION_OPEN_DOCUMENT,
+     * used here) deliberately does not include permission to browse the
+     * file's parent folder — that's a platform-level privacy boundary,
+     * not something this app can work around. So opening a single file
+     * this way intentionally leaves Root Folder untouched, rather than
+     * attempting an unreliable, provider-specific parent lookup.
+     */
     fun onSingleFilePicked(uri: Uri) {
         activity.contentResolver.takePersistableUriPermission(
             uri,
@@ -159,7 +186,9 @@ class FileController(
         mainBrowseAdapter = FileTreeAdapter(
             onFileClick = { leaf -> openFile(leaf.doc) },
             onFileLongPress = { _, _, _ -> /* main plate list: no rename/delete, per spec */ },
-            onNameConfirmed = { _, _ -> /* unused here */ }
+            onNameConfirmed = { _, _ -> },
+            isNameTaken = { _, _ -> false },
+            isKeyboardVisible = { editorController.isKeyboardCurrentlyVisible() }
         )
         binding.mainWorkspaceView.rvFolderBrowseMain.layoutManager = LinearLayoutManager(activity)
         binding.mainWorkspaceView.rvFolderBrowseMain.adapter = mainBrowseAdapter
@@ -311,13 +340,13 @@ class FileController(
         }
     }
 
-    // --- New this round: inline create/rename + long-press rename/delete ---
-
     private fun setupDrawerLists() {
         fileTreeAdapter = FileTreeAdapter(
             onFileClick = { leaf -> openFile(leaf.doc) },
             onFileLongPress = { leaf, depth, anchor -> showFileActionsPopup(leaf, depth, anchor) },
-            onNameConfirmed = { existing, newName -> handleNameConfirmed(existing, newName) }
+            onNameConfirmed = { existing, newName -> handleNameConfirmed(existing, newName) },
+            isNameTaken = { candidateName, target -> isNameTaken(candidateName, target) },
+            isKeyboardVisible = { editorController.isKeyboardCurrentlyVisible() }
         )
         binding.drawerContent.rvFileTree.layoutManager = LinearLayoutManager(activity)
         binding.drawerContent.rvFileTree.adapter = fileTreeAdapter
@@ -337,6 +366,25 @@ class FileController(
         }
     }
 
+    /** Item 2 + 5: checks whether candidateName collides with a sibling
+     * in the correct scope (root for new files, the renamed file's own
+     * parent folder for renames) — and, critically, a rename target's
+     * OWN unchanged name is never flagged as a collision with itself. */
+    private fun isNameTaken(candidateName: String, target: FileTreeAdapter.EditTarget): Boolean {
+        val fileName = if (candidateName.endsWith(".py")) candidateName else "$candidateName.py"
+        val parentDoc = when (target) {
+            is FileTreeAdapter.EditTarget.NewFile ->
+                rootTreeUri?.let { DocumentFile.fromTreeUri(activity, it) }
+            is FileTreeAdapter.EditTarget.Rename -> target.leaf.doc.parentFile
+        } ?: return false
+
+        val existing = parentDoc.findFile(fileName) ?: return false
+        return when (target) {
+            is FileTreeAdapter.EditTarget.NewFile -> true
+            is FileTreeAdapter.EditTarget.Rename -> existing.uri != target.leaf.doc.uri
+        }
+    }
+
     private fun handleNameConfirmed(existing: WorkspaceManager.FileNode.Leaf?, newName: String) {
         val uri = rootTreeUri ?: return
         if (existing == null) {
@@ -345,9 +393,17 @@ class FileController(
                 Toast.makeText(activity, "Could not create file", Toast.LENGTH_SHORT).show()
             }
         } else {
-            val renamed = workspace.renameFile(existing.doc, newName)
-            if (!renamed) {
-                Toast.makeText(activity, "Could not rename file", Toast.LENGTH_SHORT).show()
+            // Item 5: if the name is literally unchanged, skip the
+            // rename call entirely — some SAF providers apply their own
+            // conflict-avoidance logic (appending "(1)") even for a
+            // rename to the file's own existing name, since a rename is
+            // sometimes implemented as copy-then-delete under the hood.
+            val normalizedNew = if (newName.endsWith(".py")) newName else "$newName.py"
+            if (normalizedNew != existing.name) {
+                val renamed = workspace.renameFile(existing.doc, newName)
+                if (!renamed) {
+                    Toast.makeText(activity, "Could not rename file", Toast.LENGTH_SHORT).show()
+                }
             }
         }
         fileTreeAdapter.cancelEditing()

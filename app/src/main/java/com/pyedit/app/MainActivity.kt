@@ -1,9 +1,12 @@
 package com.pyedit.app
 
+import android.content.Context
 import android.os.Bundle
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.InputMethodManager
 import android.widget.PopupWindow
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -79,6 +82,7 @@ class MainActivity : AppCompatActivity() {
         executionUiController.setup()
 
         setupTopBar()
+        setupOutsideTapDismiss()
         updateActionAvailability(fileController.hasFileOpen)
 
         lifecycleScope.launch {
@@ -97,6 +101,20 @@ class MainActivity : AppCompatActivity() {
         val params = binding.drawerContent.root.layoutParams
         params.width = drawerWidth
         binding.drawerContent.root.layoutParams = params
+    }
+
+    /** Item 6: tapping empty space on the main content area (not on the
+     * editor itself — that's handled inside EditorController — but the
+     * top bar's background, or the empty-state/folder-browse main plate)
+     * dismisses the keyboard. */
+    private fun setupOutsideTapDismiss() {
+        binding.mainContentRoot.setOnTouchListener { _, event ->
+            if (event.action == MotionEvent.ACTION_DOWN) {
+                val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                imm.hideSoftInputFromWindow(binding.mainContentRoot.windowToken, 0)
+            }
+            false
+        }
     }
 
     private fun setupTopBar() {
@@ -124,9 +142,6 @@ class MainActivity : AppCompatActivity() {
         )
         popup.elevation = 8f
 
-        // Open File / Open Folder work with or without a file already
-        // open, so they're wired unconditionally, outside the
-        // hasFileOpen-gated block below.
         popupBinding.menuItemOpenFile.setOnClickListener {
             popup.dismiss()
             openFileLauncher.launch(arrayOf("*/*"))

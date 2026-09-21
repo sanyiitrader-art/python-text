@@ -15,12 +15,6 @@ import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import com.pyedit.app.databinding.ActivityMainBinding
 
-/**
- * Owns Run/Stop, the output panel (stdout/stderr streaming, header line,
- * error summary), stdin activation, and the Compile syntax-check. Never
- * touches CodeEditor directly — asks for script text/filename via
- * callbacks and reports jump-to-error requests the same way.
- */
 class ExecutionUiController(
     private val activity: AppCompatActivity,
     private val binding: ActivityMainBinding,
@@ -30,6 +24,7 @@ class ExecutionUiController(
     private val onJumpToError: (Int) -> Unit,
     private val onRunStateChanged: (isRunning: Boolean) -> Unit,
     private val isKeyboardVisible: () -> Boolean,
+    private val onShowOutputPanel: () -> Unit,
     private val onError: (String, Throwable) -> Unit
 ) {
     var isRunning: Boolean = false
@@ -62,7 +57,9 @@ class ExecutionUiController(
             val scriptText = getScriptText()
             val name = getFileName()
             binding.outputPanel.tvOutputText.text = ""
-            binding.outputPanel.root.visibility = View.VISIBLE
+            // Delegate visibility + height entirely to OutputSheetController
+            // (spec §45-46: collapsed -> 25%, otherwise preserve height).
+            onShowOutputPanel()
             isRunning = true
             onRunStateChanged(true)
             setStdinActive(false)
@@ -98,8 +95,8 @@ class ExecutionUiController(
             val resultList = result.asList()
             val ok = resultList[0].toBoolean()
 
-            binding.outputPanel.root.visibility = View.VISIBLE
             binding.outputPanel.tvOutputText.text = ""
+            onShowOutputPanel()
             appendHeaderLine("$ python -m py_compile $name\n")
 
             if (ok) {

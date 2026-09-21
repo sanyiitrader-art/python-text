@@ -26,6 +26,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var fileController: FileController
     private lateinit var executionUiController: ExecutionUiController
     private lateinit var executionController: ExecutionController
+    private lateinit var outputSheetController: OutputSheetController
     private lateinit var editorSettings: EditorSettings
     private lateinit var workspace: WorkspaceManager
     private lateinit var recentStore: RecentFilesStore
@@ -63,6 +64,9 @@ class MainActivity : AppCompatActivity() {
             launchOpenFile = { openFileLauncher.launch(arrayOf("*/*")) }
         )
 
+        outputSheetController = OutputSheetController(this, binding)
+        outputSheetController.setup()
+
         executionUiController = ExecutionUiController(
             activity = this,
             binding = binding,
@@ -77,6 +81,7 @@ class MainActivity : AppCompatActivity() {
                 binding.btnRun.setImageResource(if (running) R.drawable.ic_stop else R.drawable.ic_run)
             },
             isKeyboardVisible = { editorController.isKeyboardCurrentlyVisible() },
+            onShowOutputPanel = { outputSheetController.onRunRequested() },
             onError = ::showCrashDiagnostic
         )
         executionUiController.setup()
@@ -103,10 +108,6 @@ class MainActivity : AppCompatActivity() {
         binding.drawerContent.root.layoutParams = params
     }
 
-    /** Item 6: tapping empty space on the main content area (not on the
-     * editor itself — that's handled inside EditorController — but the
-     * top bar's background, or the empty-state/folder-browse main plate)
-     * dismisses the keyboard. */
     private fun setupOutsideTapDismiss() {
         binding.mainContentRoot.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {

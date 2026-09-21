@@ -5,6 +5,21 @@
     android:orientation="vertical"
     android:background="@color/output_background">
 
+    <!-- Drag handle (spec §42/§43): short rounded line, draggable. -->
+    <FrameLayout
+        android:id="@+id/drag_handle_touch_area"
+        android:layout_width="match_parent"
+        android:layout_height="28dp"
+        android:background="@color/topbar_background">
+
+        <View
+            android:layout_width="36dp"
+            android:layout_height="4dp"
+            android:layout_gravity="center"
+            android:background="@drawable/handle_bar" />
+
+    </FrameLayout>
+
     <ScrollView
         android:id="@+id/output_scroll"
         android:layout_width="match_parent"
@@ -30,9 +45,6 @@
         android:background="@color/topbar_background"
         android:padding="6dp">
 
-        <!-- focusable/focusableInTouchMode explicitly false at rest, so
-             this can NEVER be tapped into or take focus except when
-             MainActivity explicitly activates it from onInputRequested. -->
         <EditText
             android:id="@+id/edit_stdin"
             android:layout_width="0dp"

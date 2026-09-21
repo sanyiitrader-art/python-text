@@ -89,6 +89,11 @@
             android:background="@color/border_divider"
             app:layout_constraintTop_toBottomOf="@id/top_bar" />
 
+        <!-- Fills the whole band between the divider and the toolbar,
+             regardless of the output sheet's own height — the sheet is a
+             separate overlapping sibling below, driven by
+             OutputSheetController via layoutParams.height / translationX,
+             not by ConstraintLayout constraints. -->
         <FrameLayout
             android:id="@+id/editor_container"
             android:layout_width="match_parent"
@@ -109,16 +114,19 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent" />
 
+        <!-- Anchored at the bottom, height set programmatically by
+             OutputSheetController (not a fixed percent) — this is what
+             makes it draggable. Starts collapsed (28dp = the handle's
+             own height) and GONE until Run is first pressed. -->
         <include
             android:id="@+id/output_panel"
             layout="@layout/view_output_panel"
-            android:layout_width="0dp"
-            android:layout_height="0dp"
+            android:layout_width="match_parent"
+            android:layout_height="28dp"
             android:visibility="gone"
             app:layout_constraintBottom_toTopOf="@id/python_toolbar"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintHeight_percent="0.3" />
+            app:layout_constraintEnd_toEndOf="parent" />
 
         <include
             android:id="@+id/python_toolbar"

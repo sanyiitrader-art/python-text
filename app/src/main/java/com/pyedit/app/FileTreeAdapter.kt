@@ -17,8 +17,7 @@ class FileTreeAdapter(
     private val onFileClick: (WorkspaceManager.FileNode.Leaf) -> Unit,
     private val onFileLongPress: (leaf: WorkspaceManager.FileNode.Leaf, depth: Int, anchor: View) -> Unit,
     private val onNameConfirmed: (existing: WorkspaceManager.FileNode.Leaf?, newName: String) -> Unit,
-    private val isNameTaken: (candidateName: String, target: EditTarget) -> Boolean,
-    private val isKeyboardVisible: () -> Boolean
+    private val isNameTaken: (candidateName: String, target: EditTarget) -> Boolean
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     sealed class EditTarget {
@@ -37,9 +36,6 @@ class FileTreeAdapter(
     private var flattenedRows: List<Row> = emptyList()
     private var currentEditTarget: EditTarget? = null
 
-    // Tracks the currently-bound edit row's EditText, so an external
-    // "tap outside" handler can read its live text and confirm/cancel it —
-    // item 6.
     private var activeEditText: EditText? = null
 
     companion object {
@@ -69,13 +65,6 @@ class FileTreeAdapter(
         recomputeRows()
     }
 
-    /**
-     * Item 6: called when the user taps outside any interactive element
-     * while a create/rename row is active. Hides the keyboard always;
-     * additionally confirms (saves) the edit if the current text has no
-     * validation error. Returns whether it was saved, purely for callers
-     * that want to know — the keyboard-hide itself is the caller's job.
-     */
     fun confirmCurrentEditIfValid(): Boolean {
         val editText = activeEditText ?: return false
         val target = currentEditTarget ?: return false
@@ -210,28 +199,29 @@ class FileTreeAdapter(
                     hideKeyboard(editText)
                     true
                 } else {
-                    true // swallow Enter on invalid name; red border already shown
+                    true
                 }
             } else {
                 false
             }
         }
 
+        // FIX: removed the isKeyboardVisible() gate that was here — this
+        // is a deliberate, explicit user action (long-press Rename or
+        // tap "+"), not an automatic background trigger, and
+        // SHOW_IMPLICIT (unlike the SHOW_FORCED used for stdin
+        // activation) is a soft request that doesn't toggle an
+        // already-open keyboard closed. The gate was borrowed from a
+        // different flow where it didn't actually belong, and its
+        // underlying flag can be stale/wrong in the drawer's context —
+        // that's what was silently blocking the keyboard here.
         editText.requestFocus()
-        // FIX for item 1: only call showSoftInput when the keyboard isn't
-        // already up — calling it while already visible toggles it
-        // closed instead of just moving the input target here.
-        if (!isKeyboardVisible()) {
-            editText.post {
-                val imm = editText.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-                imm.showSoftInput(editText, InputMethodManager.SHOW_IMPLICIT)
-            }
+        editText.post {
+            val imm = editText.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+            imm.showSoftInput(editText, InputMethodManager.SHOW_IMPLICIT)
         }
     }
 
-    /** Item 2 + item 5: valid means correct .py extension AND not a name
-     * collision with another file — where "another file" excludes the
-     * file itself during a no-op rename (handled by isNameTaken). */
     private fun isRowValid(name: String, target: EditTarget): Boolean =
         isValidExtension(name) && !isNameTaken(name, target)
 

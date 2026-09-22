@@ -1,6 +1,7 @@
 package com.pyedit.app
 
 import android.content.Context
+import android.content.res.ColorStateList
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -12,16 +13,6 @@ import androidx.appcompat.app.AppCompatActivity
 import com.pyedit.app.databinding.ActivityMainBinding
 import kotlin.math.abs
 
-/**
- * Step 6: the draggable output sheet (spec §41-52) — handle drag,
- * collapse/expand, Run-respects-height-vs-opens-to-25%, and the
- * full-open threshold with haptic + sideways editor/output page mode.
- *
- * This is the most novel, hand-built piece in the whole app (nothing in
- * any library does this) — built entirely with layoutParams.height and
- * View.translationX/Y, no new dependency, but flagged as the part most
- * likely to need real-device tuning.
- */
 class OutputSheetController(
     private val activity: AppCompatActivity,
     private val binding: ActivityMainBinding
@@ -34,6 +25,7 @@ class OutputSheetController(
     private var containerHeightPx = 0
     private var currentHeightPx = handleHeightPx
     private var isSidewaysMode = false
+    private var isShowingOutputPage = true
     private var hasTriggeredFullOpenThisDrag = false
 
     private var dragStartRawY = 0f
@@ -50,30 +42,30 @@ class OutputSheetController(
             true
         }
 
-        // Sideways-mode gestures live on the whole output panel root
-        // (once in that mode, the handle itself is conceptually gone —
-        // spec §47 "remove the output sheet drag handle" — so this
-        // second listener on the root covers swiping while there).
-        binding.outputPanel.root.setOnTouchListener { _, event ->
-            if (isSidewaysMode) {
-                handleSidewaysTouch(event)
-                true
-            } else {
-                false
-            }
+        // Item 2 fix: listener now lives on the dedicated overlay, not on
+        // output_panel.root — the overlay has no scrolling/editable
+        // children to steal the gesture.
+        binding.sidewaysGestureOverlay.setOnTouchListener { _, event ->
+            handleSidewaysTouch(event)
+            true
         }
     }
 
     private fun dp(value: Int): Int =
         (value * activity.resources.displayMetrics.density).toInt()
 
+    /** Uses the always-visible root + top bar rather than editor_container
+     * (which can be GONE before any file is opened, which would have
+     * measured as 0 height). */
     private fun ensureContainerHeightMeasured() {
         if (containerHeightPx == 0) {
-            containerHeightPx = binding.editorContainer.height
+            val rootHeight = binding.mainContentRoot.height
+            val topBarHeight = binding.topBar.height
+            if (rootHeight > 0 && topBarHeight > 0) {
+                containerHeightPx = rootHeight - topBarHeight
+            }
         }
     }
-
-    // --- Bottom-sheet drag (handle) --------------------------------------
 
     private fun handleDragTouch(event: MotionEvent) {
         ensureContainerHeightMeasured()
@@ -86,7 +78,7 @@ class OutputSheetController(
                 hasTriggeredFullOpenThisDrag = false
             }
             MotionEvent.ACTION_MOVE -> {
-                val deltaY = dragStartRawY - event.rawY // positive = dragging up
+                val deltaY = dragStartRawY - event.rawY
                 val newHeight = (dragStartHeightPx + deltaY.toInt())
                     .coerceIn(handleHeightPx, containerHeightPx)
                 applyHeight(newHeight)
@@ -98,10 +90,8 @@ class OutputSheetController(
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                if (!isSidewaysMode) {
-                    if (currentHeightPx < collapseSnapBelowPx) {
-                        applyHeight(handleHeightPx)
-                    }
+                if (!isSidewaysMode && currentHeightPx < collapseSnapBelowPx) {
+                    applyHeight(handleHeightPx)
                 }
             }
         }
@@ -114,15 +104,21 @@ class OutputSheetController(
         binding.outputPanel.root.layoutParams = params
     }
 
-    // --- Run integration --------------------------------------------------
-
     /**
-     * Spec §45-46: if collapsed (at/below 5%), Run opens to 25%; if
-     * already above 5%, Run preserves the current height untouched.
+     * Item 4 (second half): if locked in sideways mode and Run is pressed
+     * while the Editor page is showing, switch to the Output page
+     * automatically — only one page is visible at a time in that mode.
      */
     fun onRunRequested() {
         ensureContainerHeightMeasured()
         binding.outputPanel.root.visibility = View.VISIBLE
+
+        if (isSidewaysMode) {
+            if (!isShowingOutputPage) {
+                goToOutputPage()
+            }
+            return
+        }
 
         if (containerHeightPx == 0) return
         val collapsedThresholdPx = (containerHeightPx * 0.05f).toInt()
@@ -130,20 +126,10 @@ class OutputSheetController(
             val targetHeight = (containerHeightPx * runOpenFractionOfContainer).toInt()
             animateToHeight(targetHeight)
         }
-        // else: leave currentHeightPx exactly as the user left it.
     }
 
     private fun animateToHeight(targetHeightPx: Int) {
         val start = currentHeightPx
-        binding.outputPanel.root.animate()
-            .setDuration(180)
-            .setUpdateListener { fraction ->
-                // Manual interpolation since ValueAnimator on a bare
-                // ViewPropertyAnimator isn't directly available here —
-                // simplest reliable path is a plain height tween.
-            }
-        // ViewPropertyAnimator can't animate layoutParams.height directly;
-        // use a straightforward manual tween instead.
         val steps = 10
         val diff = targetHeightPx - start
         val handler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -154,19 +140,17 @@ class OutputSheetController(
         }
     }
 
-    // --- Full-open + sideways mode -----------------------------------------
-
     private fun triggerFullOpen() {
         vibrateOnce()
         isSidewaysMode = true
-        binding.outputPanel.dragHandleTouchArea.visibility = View.GONE // spec §47: remove the handle
+        binding.outputPanel.dragHandleTouchArea.visibility = View.GONE
+        binding.sidewaysGestureOverlay.visibility = View.VISIBLE
+        binding.pageIndicatorBar.visibility = View.VISIBLE
 
         applyHeight(containerHeightPx)
-        // Output currently occupies the full band; slide the editor out
-        // to the left so Output is the visible page (this is the state
-        // the user just dragged into).
         binding.editorContainer.translationX = -screenWidth().toFloat()
         binding.outputPanel.root.translationX = 0f
+        setActivePage(showingOutput = true)
     }
 
     private fun vibrateOnce() {
@@ -179,17 +163,11 @@ class OutputSheetController(
                 val vibrator = activity.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
                 vibrator.vibrate(VibrationEffect.createOneShot(100, VibrationEffect.DEFAULT_AMPLITUDE))
             }
-        } catch (t: Throwable) { /* haptics are a nice-to-have, never worth crashing over */ }
+        } catch (t: Throwable) { /* haptics are a nice-to-have */ }
     }
 
     private fun screenWidth(): Int = activity.resources.displayMetrics.widthPixels
 
-    /**
-     * Handles both horizontal swipe (Output <-> Editor pages, spec §48)
-     * and downward drag (exit sideways mode back to bottom-sheet, §49)
-     * while in sideways mode. Whichever direction moves further from the
-     * initial touch determines which gesture this touch sequence is.
-     */
     private fun handleSidewaysTouch(event: MotionEvent) {
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
@@ -211,32 +189,33 @@ class OutputSheetController(
                 }
 
                 if (sidewaysTrackingHorizontal) {
-                    // Swiping right on Output page moves toward Editor.
-                    val clamped = deltaX.coerceIn(0f, screenWidth().toFloat())
-                    binding.outputPanel.root.translationX = clamped
-                    binding.editorContainer.translationX = clamped - screenWidth()
-                } else if (sidewaysTrackingVertical) {
-                    // Dragging down begins the "return to bottom sheet" motion —
-                    // spec §49: moves down slightly first, then transitions.
+                    if (isShowingOutputPage) {
+                        val clamped = deltaX.coerceIn(0f, screenWidth().toFloat())
+                        binding.outputPanel.root.translationX = clamped
+                        binding.editorContainer.translationX = clamped - screenWidth()
+                    } else {
+                        val clamped = deltaX.coerceIn(-screenWidth().toFloat(), 0f)
+                        binding.editorContainer.translationX = clamped
+                        binding.outputPanel.root.translationX = clamped + screenWidth()
+                    }
+                } else if (sidewaysTrackingVertical && isShowingOutputPage) {
                     val clamped = deltaY.coerceIn(0f, containerHeightPx.toFloat())
                     binding.outputPanel.root.translationY = clamped
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 if (sidewaysTrackingHorizontal) {
-                    val movedPastHalfway = binding.outputPanel.root.translationX > screenWidth() / 2f
-                    if (movedPastHalfway) {
-                        goToEditorPage()
+                    if (isShowingOutputPage) {
+                        val movedPastHalfway = binding.outputPanel.root.translationX > screenWidth() / 2f
+                        if (movedPastHalfway) goToEditorPage() else snapBackToOutputPage()
                     } else {
-                        snapBackToOutputPage()
+                        val movedPastHalfway = binding.editorContainer.translationX > -screenWidth() / 2f
+                        if (movedPastHalfway) goToOutputPage() else snapBackToEditorPage()
                     }
                 } else if (sidewaysTrackingVertical) {
                     val movedPastThreshold = binding.outputPanel.root.translationY > dp(80)
-                    if (movedPastThreshold) {
-                        exitSidewaysMode()
-                    } else {
-                        binding.outputPanel.root.translationY = 0f
-                    }
+                    if (movedPastThreshold) exitSidewaysMode()
+                    else binding.outputPanel.root.animate().translationY(0f).setDuration(120).start()
                 }
                 sidewaysTrackingHorizontal = false
                 sidewaysTrackingVertical = false
@@ -247,6 +226,7 @@ class OutputSheetController(
     private fun goToEditorPage() {
         binding.outputPanel.root.animate().translationX(screenWidth().toFloat()).setDuration(150).start()
         binding.editorContainer.animate().translationX(0f).setDuration(150).start()
+        setActivePage(showingOutput = false)
     }
 
     private fun snapBackToOutputPage() {
@@ -254,21 +234,50 @@ class OutputSheetController(
         binding.editorContainer.animate().translationX(-screenWidth().toFloat()).setDuration(150).start()
     }
 
-    /** Spec §49: return to bottom-sheet mode. */
+    private fun goToOutputPage() {
+        binding.outputPanel.root.animate().translationX(0f).setDuration(150).start()
+        binding.editorContainer.animate().translationX(-screenWidth().toFloat()).setDuration(150).start()
+        setActivePage(showingOutput = true)
+    }
+
+    private fun snapBackToEditorPage() {
+        binding.editorContainer.animate().translationX(0f).setDuration(150).start()
+        binding.outputPanel.root.animate().translationX(screenWidth().toFloat()).setDuration(150).start()
+    }
+
+    private fun setActivePage(showingOutput: Boolean) {
+        isShowingOutputPage = showingOutput
+        val activeTint = ColorStateList.valueOf(activity.getColor(R.color.dot_active))
+        val inactiveTint = ColorStateList.valueOf(activity.getColor(R.color.dot_inactive))
+        binding.dotOutput.backgroundTintList = if (showingOutput) activeTint else inactiveTint
+        binding.dotEditor.backgroundTintList = if (showingOutput) inactiveTint else activeTint
+    }
+
     private fun exitSidewaysMode() {
         isSidewaysMode = false
         binding.outputPanel.dragHandleTouchArea.visibility = View.VISIBLE
+        binding.sidewaysGestureOverlay.visibility = View.GONE
+        binding.pageIndicatorBar.visibility = View.GONE
         binding.outputPanel.root.translationY = 0f
         binding.editorContainer.translationX = 0f
         binding.outputPanel.root.translationX = 0f
+        isShowingOutputPage = true
 
         val target = (containerHeightPx * runOpenFractionOfContainer).toInt()
         animateToHeight(target)
     }
 
-    /** Called if the user swipes back to the Editor page while in
-     * sideways mode — from there, tapping into the editor should behave
-     * like the ordinary bottom-sheet state again (output no longer full
-     * screen). Exposed so ExecutionUiController/other callers can check. */
+    /**
+     * Item 3 fix: called whenever a different file is opened. If locked
+     * in sideways mode, resets back to normal bottom-sheet state so the
+     * editor is actually visible (translationX was still offscreen),
+     * instead of leaving stale offsets that produced the "empty slate."
+     */
+    fun resetForNewFileIfNeeded() {
+        if (isSidewaysMode) {
+            exitSidewaysMode()
+        }
+    }
+
     fun isInSidewaysMode(): Boolean = isSidewaysMode
 }

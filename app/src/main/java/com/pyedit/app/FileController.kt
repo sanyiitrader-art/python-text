@@ -28,6 +28,7 @@ class FileController(
     private val workspace: WorkspaceManager,
     private val recentStore: RecentFilesStore,
     private val editorController: EditorController,
+    private val onFileOpened: () -> Unit,
     private val onStateChanged: (hasFileOpen: Boolean, isDirty: Boolean, displayName: String) -> Unit
 ) {
     var rootTreeUri: Uri? = null
@@ -174,7 +175,7 @@ class FileController(
     private fun setupMainWorkspaceView() {
         mainBrowseAdapter = FileTreeAdapter(
             onFileClick = { leaf -> openFile(leaf.doc) },
-            onFileLongPress = { _, _, _ -> /* main plate list: no rename/delete, per spec */ },
+            onFileLongPress = { _, _, _ -> },
             onNameConfirmed = { _, _ -> },
             isNameTaken = { _, _ -> false }
         )
@@ -199,6 +200,10 @@ class FileController(
 
     fun openFile(doc: DocumentFile) {
         checkUnsavedThenRun {
+            // Item 3 fix: reset any stale sideways-mode page offset FIRST,
+            // so the editor is guaranteed to actually be visible.
+            onFileOpened()
+
             val content = workspace.readFile(doc)
             editorController.loadText(content)
             currentFileDoc = doc
@@ -206,7 +211,10 @@ class FileController(
             hasFileOpen = true
             notifyState()
             showEditorState()
-            binding.outputPanel.root.visibility = View.GONE
+            // The line forcibly hiding the output panel here was removed —
+            // per item 1 the panel now always exists; hiding it was
+            // fighting that and, combined with the sideways-mode offset,
+            // was the direct cause of the reported "empty slate."
             editorController.clearErrorHighlightIfActive()
             activity.lifecycleScope.launch {
                 recentStore.addRecent(doc.uri.toString(), doc.name ?: "untitled.py")

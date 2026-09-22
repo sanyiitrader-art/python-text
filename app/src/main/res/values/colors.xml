@@ -16,4 +16,8 @@
 
     <color name="selection_overlay">#3365E6B3</color>
     <color name="error_highlight_overlay">#4DFF5C5C</color>
+
+    <!-- New: page-indicator dots (item 4) -->
+    <color name="dot_inactive">#78857F</color>
+    <color name="dot_active">#5A6662</color>
 </resources>

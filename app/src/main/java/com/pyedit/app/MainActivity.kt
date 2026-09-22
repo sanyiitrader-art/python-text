@@ -54,7 +54,17 @@ class MainActivity : AppCompatActivity() {
         editorController = EditorController(this, binding, editorSettings, ::showCrashDiagnostic)
         editorController.setup()
 
-        fileController = FileController(this, binding, workspace, recentStore, editorController) { hasFileOpen, _, displayName ->
+        outputSheetController = OutputSheetController(this, binding)
+        outputSheetController.setup()
+
+        fileController = FileController(
+            activity = this,
+            binding = binding,
+            workspace = workspace,
+            recentStore = recentStore,
+            editorController = editorController,
+            onFileOpened = { outputSheetController.resetForNewFileIfNeeded() }
+        ) { hasFileOpen, _, displayName ->
             binding.tvFilename.text = displayName
             updateActionAvailability(hasFileOpen)
         }
@@ -63,9 +73,6 @@ class MainActivity : AppCompatActivity() {
             launchOpenFolder = { openFolderLauncher.launch(null) },
             launchOpenFile = { openFileLauncher.launch(arrayOf("*/*")) }
         )
-
-        outputSheetController = OutputSheetController(this, binding)
-        outputSheetController.setup()
 
         executionUiController = ExecutionUiController(
             activity = this,

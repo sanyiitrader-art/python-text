@@ -15,14 +15,16 @@ import kotlin.math.abs
 
 class OutputSheetController(
     private val activity: AppCompatActivity,
-    private val binding: ActivityMainBinding
+    private val binding: ActivityMainBinding,
+    private val onEditorTapPassthrough: () -> Unit
 ) {
     private val handleHeightPx = dp(28)
     private val runOpenFractionOfContainer = 0.25f
     private val collapseSnapBelowPx = dp(48)
     private val fullOpenThresholdFraction = 0.96f
+    private val pageCommitFraction = 0.3f // FIX item 3: was an implicit 0.5, lowered so swipes need less force
 
-    private var containerHeightPx = 0
+    private var containerHeightPx = handleHeightPx
     private var currentHeightPx = handleHeightPx
     private var isSidewaysMode = false
     private var isShowingOutputPage = true
@@ -42,9 +44,6 @@ class OutputSheetController(
             true
         }
 
-        // Item 2 fix: listener now lives on the dedicated overlay, not on
-        // output_panel.root — the overlay has no scrolling/editable
-        // children to steal the gesture.
         binding.sidewaysGestureOverlay.setOnTouchListener { _, event ->
             handleSidewaysTouch(event)
             true
@@ -54,30 +53,44 @@ class OutputSheetController(
     private fun dp(value: Int): Int =
         (value * activity.resources.displayMetrics.density).toInt()
 
-    /** Uses the always-visible root + top bar rather than editor_container
-     * (which can be GONE before any file is opened, which would have
-     * measured as 0 height). */
-    private fun ensureContainerHeightMeasured() {
-        if (containerHeightPx == 0) {
-            val rootHeight = binding.mainContentRoot.height
-            val topBarHeight = binding.topBar.height
-            if (rootHeight > 0 && topBarHeight > 0) {
-                containerHeightPx = rootHeight - topBarHeight
-            }
+    /**
+     * FIX for items 1, 2, 6: this used to be measured ONCE and cached
+     * forever. That's exactly why the sheet locked in at a stale, too-
+     * small height ("locked in the middle") whenever the measurement had
+     * been taken before the keyboard toolbar or page-indicator bar were
+     * accounted for, why it could grow past the indicator bar (never
+     * subtracted), and why it could be dragged past real screen bounds
+     * while the keyboard was open (root height had shrunk from
+     * adjustResize, but the cached max hadn't). Now recomputed fresh
+     * every time, always subtracting whatever bars are CURRENTLY visible.
+     */
+    private fun refreshContainerHeight() {
+        val rootHeight = binding.mainContentRoot.height
+        val topBarHeight = binding.topBar.height
+        if (rootHeight == 0 || topBarHeight == 0) return // not laid out yet; keep last known value
+
+        var available = rootHeight - topBarHeight
+        if (binding.pageIndicatorBar.visibility == View.VISIBLE) {
+            available -= binding.pageIndicatorBar.height
         }
+        if (binding.pythonToolbar.root.visibility == View.VISIBLE) {
+            available -= binding.pythonToolbar.root.height
+        }
+        containerHeightPx = available.coerceAtLeast(handleHeightPx)
     }
 
     private fun handleDragTouch(event: MotionEvent) {
-        ensureContainerHeightMeasured()
-        if (containerHeightPx == 0) return
-
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
+                refreshContainerHeight()
                 dragStartRawY = event.rawY
                 dragStartHeightPx = currentHeightPx
                 hasTriggeredFullOpenThisDrag = false
             }
             MotionEvent.ACTION_MOVE -> {
+                // Recomputed on every move, not just once — covers the
+                // keyboard appearing/disappearing mid-drag too.
+                refreshContainerHeight()
                 val deltaY = dragStartRawY - event.rawY
                 val newHeight = (dragStartHeightPx + deltaY.toInt())
                     .coerceIn(handleHeightPx, containerHeightPx)
@@ -104,23 +117,15 @@ class OutputSheetController(
         binding.outputPanel.root.layoutParams = params
     }
 
-    /**
-     * Item 4 (second half): if locked in sideways mode and Run is pressed
-     * while the Editor page is showing, switch to the Output page
-     * automatically — only one page is visible at a time in that mode.
-     */
     fun onRunRequested() {
-        ensureContainerHeightMeasured()
+        refreshContainerHeight()
         binding.outputPanel.root.visibility = View.VISIBLE
 
         if (isSidewaysMode) {
-            if (!isShowingOutputPage) {
-                goToOutputPage()
-            }
+            if (!isShowingOutputPage) goToOutputPage()
             return
         }
 
-        if (containerHeightPx == 0) return
         val collapsedThresholdPx = (containerHeightPx * 0.05f).toInt()
         if (currentHeightPx <= collapsedThresholdPx) {
             val targetHeight = (containerHeightPx * runOpenFractionOfContainer).toInt()
@@ -147,6 +152,10 @@ class OutputSheetController(
         binding.sidewaysGestureOverlay.visibility = View.VISIBLE
         binding.pageIndicatorBar.visibility = View.VISIBLE
 
+        // Recompute one more time now that the indicator bar itself is
+        // visible (its own height must be excluded from the final lock
+        // height too — part of the item 2 fix).
+        refreshContainerHeight()
         applyHeight(containerHeightPx)
         binding.editorContainer.translationX = -screenWidth().toFloat()
         binding.outputPanel.root.translationX = 0f
@@ -204,18 +213,37 @@ class OutputSheetController(
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                if (sidewaysTrackingHorizontal) {
-                    if (isShowingOutputPage) {
-                        val movedPastHalfway = binding.outputPanel.root.translationX > screenWidth() / 2f
-                        if (movedPastHalfway) goToEditorPage() else snapBackToOutputPage()
-                    } else {
-                        val movedPastHalfway = binding.editorContainer.translationX > -screenWidth() / 2f
-                        if (movedPastHalfway) goToOutputPage() else snapBackToEditorPage()
+                when {
+                    sidewaysTrackingHorizontal -> {
+                        if (isShowingOutputPage) {
+                            // FIX item 3: threshold lowered to pageCommitFraction (0.3).
+                            val committed = binding.outputPanel.root.translationX > screenWidth() * pageCommitFraction
+                            if (committed) goToEditorPage() else snapBackToOutputPage()
+                        } else {
+                            // FIX item 4: this comparison was inverted ('>' instead
+                            // of '<'), which is why ANY touch here — including a
+                            // rightward swipe that produced zero movement — always
+                            // evaluated true and switched pages regardless of
+                            // direction. Correct check: committed only when dragged
+                            // LEFT past the threshold.
+                            val committed = binding.editorContainer.translationX < -screenWidth() * pageCommitFraction
+                            if (committed) goToOutputPage() else snapBackToEditorPage()
+                        }
                     }
-                } else if (sidewaysTrackingVertical) {
-                    val movedPastThreshold = binding.outputPanel.root.translationY > dp(80)
-                    if (movedPastThreshold) exitSidewaysMode()
-                    else binding.outputPanel.root.animate().translationY(0f).setDuration(120).start()
+                    sidewaysTrackingVertical -> {
+                        val committed = binding.outputPanel.root.translationY > dp(80)
+                        if (committed) exitSidewaysMode()
+                        else binding.outputPanel.root.animate().translationY(0f).setDuration(120).start()
+                    }
+                    else -> {
+                        // FIX item 5: a plain tap (no drag detected at all) on the
+                        // Editor page was previously just swallowed by this overlay,
+                        // which is why the keyboard could never be summoned this way.
+                        // Relay it through as a focus+show-keyboard request instead.
+                        if (!isShowingOutputPage) {
+                            onEditorTapPassthrough()
+                        }
+                    }
                 }
                 sidewaysTrackingHorizontal = false
                 sidewaysTrackingVertical = false
@@ -263,16 +291,11 @@ class OutputSheetController(
         binding.outputPanel.root.translationX = 0f
         isShowingOutputPage = true
 
+        refreshContainerHeight()
         val target = (containerHeightPx * runOpenFractionOfContainer).toInt()
         animateToHeight(target)
     }
 
-    /**
-     * Item 3 fix: called whenever a different file is opened. If locked
-     * in sideways mode, resets back to normal bottom-sheet state so the
-     * editor is actually visible (translationX was still offscreen),
-     * instead of leaving stale offsets that produced the "empty slate."
-     */
     fun resetForNewFileIfNeeded() {
         if (isSidewaysMode) {
             exitSidewaysMode()

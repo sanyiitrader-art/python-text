@@ -54,7 +54,13 @@ class MainActivity : AppCompatActivity() {
         editorController = EditorController(this, binding, editorSettings, ::showCrashDiagnostic)
         editorController.setup()
 
-        outputSheetController = OutputSheetController(this, binding)
+        // Item 5 wiring: relayed taps on the Editor page (inside sideways
+        // mode) call back into EditorController to focus + show keyboard.
+        outputSheetController = OutputSheetController(
+            activity = this,
+            binding = binding,
+            onEditorTapPassthrough = { editorController.requestFocusAndShowKeyboard() }
+        )
         outputSheetController.setup()
 
         fileController = FileController(

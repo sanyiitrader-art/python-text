@@ -48,9 +48,6 @@ class EditorController(
 
         attachContentBehaviors()
 
-        // Item 6: tapping empty space inside the editor also dismisses
-        // the keyboard now, in addition to clearing the error highlight
-        // it already did.
         editor.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
                 clearErrorHighlightIfActive()
@@ -69,6 +66,19 @@ class EditorController(
     private fun hideKeyboard() {
         val imm = activity.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
         imm.hideSoftInputFromWindow(editor.windowToken, 0)
+    }
+
+    /**
+     * New (item 5's fix, called from OutputSheetController when a tap on
+     * the Editor page inside sideways mode is relayed through instead of
+     * being swallowed by the gesture overlay).
+     */
+    fun requestFocusAndShowKeyboard() {
+        editor.requestFocus()
+        editor.post {
+            val imm = activity.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+            imm.showSoftInput(editor, InputMethodManager.SHOW_IMPLICIT)
+        }
     }
 
     fun onContentChanged(callback: () -> Unit) {

@@ -26,9 +26,6 @@ class FileTreeAdapter(
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     sealed class EditTarget {
-        /** defaultName carries the pre-computed non-colliding name
-         * (e.g. "untitled(2).py") — computed by FileController, which
-         * has the folder-listing access needed to check collisions. */
         data class NewFile(val depth: Int, val defaultName: String) : EditTarget()
         data class Rename(val leaf: WorkspaceManager.FileNode.Leaf, val depth: Int) : EditTarget()
     }
@@ -172,10 +169,23 @@ class FileTreeAdapter(
         }
     }
 
-    /** Real, specific reasons — surfaced both in the red-border trigger
-     * and the new tooltip text. Returns null when the name is valid. */
+    /**
+     * FIX: split the old single "isValidExtension" check into three
+     * distinct, accurate reasons instead of one generic message covering
+     * all of them:
+     * - completely empty box
+     * - has ".py" but nothing before it (no actual filename)
+     * - has real text but wrong/missing extension
+     * - name collision (unchanged from before)
+     */
     private fun validationReason(name: String, target: EditTarget): String? {
-        if (!isValidExtension(name)) return "Only .py files are supported"
+        if (name.isEmpty()) return "Type a file name"
+
+        val nameBeforeExtension = if (name.endsWith(".py")) name.removeSuffix(".py") else name
+        if (nameBeforeExtension.isEmpty()) return "Type a name before .py"
+
+        if (!name.endsWith(".py")) return "Only .py files are supported"
+
         if (isNameTaken(name, target)) return "A file with this name already exists"
         return null
     }
@@ -186,7 +196,7 @@ class FileTreeAdapter(
         activeEditText = editText
 
         editText.setOnEditorActionListener(null)
-        editText.translationX = 0f // reset in case this view was recycled mid-shake
+        editText.translationX = 0f
 
         val initialName = when (target) {
             is EditTarget.NewFile -> target.defaultName
@@ -242,8 +252,6 @@ class FileTreeAdapter(
         errorLabel.visibility = if (valid) View.GONE else View.VISIBLE
     }
 
-    /** Shake + 0.5s vibrate, synchronized — new feature for a failed
-     * save attempt (Enter, or tap-outside-confirm) while invalid. */
     private fun shakeAndVibrateInvalid(editText: EditText) {
         val amplitude = (8 * editText.context.resources.displayMetrics.density)
         val animator = ObjectAnimator.ofFloat(
@@ -267,8 +275,6 @@ class FileTreeAdapter(
             }
         } catch (t: Throwable) { /* haptics are a nice-to-have */ }
     }
-
-    private fun isValidExtension(name: String): Boolean = name.endsWith(".py") && name.length > 3
 
     override fun getItemCount(): Int = flattenedRows.size
 }

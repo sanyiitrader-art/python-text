@@ -22,13 +22,25 @@ class OutputSheetController(
     private val runOpenFractionOfContainer = 0.25f
     private val collapseSnapBelowPx = dp(48)
     private val fullOpenThresholdFraction = 0.96f
-    private val pageCommitFraction = 0.3f // FIX item 3: was an implicit 0.5, lowered so swipes need less force
+    private val pageCommitFraction = 0.3f
 
     private var containerHeightPx = handleHeightPx
     private var currentHeightPx = handleHeightPx
     private var isSidewaysMode = false
     private var isShowingOutputPage = true
-    private var hasTriggeredFullOpenThisDrag = false
+
+    // FIX: replaces the old "commit immediately on crossing the
+    // threshold" flag. This now means "currently past the threshold
+    // WHILE STILL DRAGGING" — a preview state only. Nothing about
+    // isSidewaysMode, translationX, or the handle/overlay swap happens
+    // here anymore; that's deferred entirely to ACTION_UP in
+    // commitFullOpen(). That's the actual fix: previously, reaching the
+    // threshold during ACTION_MOVE permanently locked everything in
+    // right then, so dragging back down before lifting your finger had
+    // nothing left to undo — the sheet's height kept following your
+    // finger, but the editor was already translated fully off-screen,
+    // which is exactly the blank "editor-colored space" you saw.
+    private var previewingFullOpen = false
 
     private var dragStartRawY = 0f
     private var dragStartHeightPx = 0
@@ -53,21 +65,10 @@ class OutputSheetController(
     private fun dp(value: Int): Int =
         (value * activity.resources.displayMetrics.density).toInt()
 
-    /**
-     * FIX for items 1, 2, 6: this used to be measured ONCE and cached
-     * forever. That's exactly why the sheet locked in at a stale, too-
-     * small height ("locked in the middle") whenever the measurement had
-     * been taken before the keyboard toolbar or page-indicator bar were
-     * accounted for, why it could grow past the indicator bar (never
-     * subtracted), and why it could be dragged past real screen bounds
-     * while the keyboard was open (root height had shrunk from
-     * adjustResize, but the cached max hadn't). Now recomputed fresh
-     * every time, always subtracting whatever bars are CURRENTLY visible.
-     */
     private fun refreshContainerHeight() {
         val rootHeight = binding.mainContentRoot.height
         val topBarHeight = binding.topBar.height
-        if (rootHeight == 0 || topBarHeight == 0) return // not laid out yet; keep last known value
+        if (rootHeight == 0 || topBarHeight == 0) return
 
         var available = rootHeight - topBarHeight
         if (binding.pageIndicatorBar.visibility == View.VISIBLE) {
@@ -85,11 +86,9 @@ class OutputSheetController(
                 refreshContainerHeight()
                 dragStartRawY = event.rawY
                 dragStartHeightPx = currentHeightPx
-                hasTriggeredFullOpenThisDrag = false
+                previewingFullOpen = false
             }
             MotionEvent.ACTION_MOVE -> {
-                // Recomputed on every move, not just once — covers the
-                // keyboard appearing/disappearing mid-drag too.
                 refreshContainerHeight()
                 val deltaY = dragStartRawY - event.rawY
                 val newHeight = (dragStartHeightPx + deltaY.toInt())
@@ -97,15 +96,32 @@ class OutputSheetController(
                 applyHeight(newHeight)
 
                 val fraction = newHeight.toFloat() / containerHeightPx.toFloat()
-                if (!hasTriggeredFullOpenThisDrag && fraction >= fullOpenThresholdFraction) {
-                    hasTriggeredFullOpenThisDrag = true
-                    triggerFullOpen()
+                if (fraction >= fullOpenThresholdFraction) {
+                    if (!previewingFullOpen) {
+                        // Haptic fires here, on first reaching the
+                        // threshold — still mid-drag, per the original
+                        // "vibrate when the sheet reaches the boundary"
+                        // requirement — not on release.
+                        previewingFullOpen = true
+                        vibrateOnce()
+                        binding.pageIndicatorBar.visibility = View.VISIBLE
+                    }
+                } else {
+                    if (previewingFullOpen) {
+                        // Dragged back down below the threshold before
+                        // releasing — cancel the preview cleanly.
+                        previewingFullOpen = false
+                        binding.pageIndicatorBar.visibility = View.GONE
+                    }
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                if (!isSidewaysMode && currentHeightPx < collapseSnapBelowPx) {
+                if (previewingFullOpen) {
+                    commitFullOpen()
+                } else if (!isSidewaysMode && currentHeightPx < collapseSnapBelowPx) {
                     applyHeight(handleHeightPx)
                 }
+                previewingFullOpen = false
             }
         }
     }
@@ -145,16 +161,15 @@ class OutputSheetController(
         }
     }
 
-    private fun triggerFullOpen() {
-        vibrateOnce()
+    /** Only reached from ACTION_UP/CANCEL while still previewing — this
+     * is the actual, real lock-in, now correctly deferred to finger
+     * release instead of happening mid-drag. */
+    private fun commitFullOpen() {
         isSidewaysMode = true
         binding.outputPanel.dragHandleTouchArea.visibility = View.GONE
         binding.sidewaysGestureOverlay.visibility = View.VISIBLE
         binding.pageIndicatorBar.visibility = View.VISIBLE
 
-        // Recompute one more time now that the indicator bar itself is
-        // visible (its own height must be excluded from the final lock
-        // height too — part of the item 2 fix).
         refreshContainerHeight()
         applyHeight(containerHeightPx)
         binding.editorContainer.translationX = -screenWidth().toFloat()
@@ -216,16 +231,9 @@ class OutputSheetController(
                 when {
                     sidewaysTrackingHorizontal -> {
                         if (isShowingOutputPage) {
-                            // FIX item 3: threshold lowered to pageCommitFraction (0.3).
                             val committed = binding.outputPanel.root.translationX > screenWidth() * pageCommitFraction
                             if (committed) goToEditorPage() else snapBackToOutputPage()
                         } else {
-                            // FIX item 4: this comparison was inverted ('>' instead
-                            // of '<'), which is why ANY touch here — including a
-                            // rightward swipe that produced zero movement — always
-                            // evaluated true and switched pages regardless of
-                            // direction. Correct check: committed only when dragged
-                            // LEFT past the threshold.
                             val committed = binding.editorContainer.translationX < -screenWidth() * pageCommitFraction
                             if (committed) goToOutputPage() else snapBackToEditorPage()
                         }
@@ -236,10 +244,6 @@ class OutputSheetController(
                         else binding.outputPanel.root.animate().translationY(0f).setDuration(120).start()
                     }
                     else -> {
-                        // FIX item 5: a plain tap (no drag detected at all) on the
-                        // Editor page was previously just swallowed by this overlay,
-                        // which is why the keyboard could never be summoned this way.
-                        // Relay it through as a focus+show-keyboard request instead.
                         if (!isShowingOutputPage) {
                             onEditorTapPassthrough()
                         }

@@ -1,6 +1,11 @@
 package com.pyedit.app
 
+import android.animation.ObjectAnimator
 import android.content.Context
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.LayoutInflater
@@ -21,7 +26,10 @@ class FileTreeAdapter(
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     sealed class EditTarget {
-        data class NewFile(val depth: Int) : EditTarget()
+        /** defaultName carries the pre-computed non-colliding name
+         * (e.g. "untitled(2).py") — computed by FileController, which
+         * has the folder-listing access needed to check collisions. */
+        data class NewFile(val depth: Int, val defaultName: String) : EditTarget()
         data class Rename(val leaf: WorkspaceManager.FileNode.Leaf, val depth: Int) : EditTarget()
     }
 
@@ -49,8 +57,8 @@ class FileTreeAdapter(
         recomputeRows()
     }
 
-    fun startCreatingNewFile() {
-        currentEditTarget = EditTarget.NewFile(depth = 0)
+    fun startCreatingNewFile(defaultName: String) {
+        currentEditTarget = EditTarget.NewFile(depth = 0, defaultName = defaultName)
         recomputeRows()
     }
 
@@ -69,11 +77,13 @@ class FileTreeAdapter(
         val editText = activeEditText ?: return false
         val target = currentEditTarget ?: return false
         val text = editText.text.toString()
-        if (isValidExtension(text) && !isNameTaken(text, target)) {
+        val reason = validationReason(text, target)
+        if (reason == null) {
             val existing = (target as? EditTarget.Rename)?.leaf
             onNameConfirmed(existing, text)
             return true
         }
+        shakeAndVibrateInvalid(editText)
         return false
     }
 
@@ -162,27 +172,37 @@ class FileTreeAdapter(
         }
     }
 
+    /** Real, specific reasons — surfaced both in the red-border trigger
+     * and the new tooltip text. Returns null when the name is valid. */
+    private fun validationReason(name: String, target: EditTarget): String? {
+        if (!isValidExtension(name)) return "Only .py files are supported"
+        if (isNameTaken(name, target)) return "A file with this name already exists"
+        return null
+    }
+
     private fun bindEditRow(holder: EditViewHolder, target: EditTarget) {
         val editText = holder.binding.editFileName
+        val errorLabel = holder.binding.tvNameError
         activeEditText = editText
 
         editText.setOnEditorActionListener(null)
+        editText.translationX = 0f // reset in case this view was recycled mid-shake
 
         val initialName = when (target) {
-            is EditTarget.NewFile -> "untitled.py"
+            is EditTarget.NewFile -> target.defaultName
             is EditTarget.Rename -> target.leaf.name
         }
         editText.setText(initialName)
         val selectEnd = initialName.lastIndexOf(".py").let { if (it == -1) initialName.length else it }
         editText.setSelection(0, selectEnd)
-        applyBorder(editText, isRowValid(initialName, target))
+        applyValidationUi(editText, errorLabel, validationReason(initialName, target))
 
         editText.tag?.let { (it as? TextWatcher)?.let { w -> editText.removeTextChangedListener(w) } }
         val watcher = object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: Editable?) {
-                applyBorder(editText, isRowValid(s?.toString() ?: "", target))
+                applyValidationUi(editText, errorLabel, validationReason(s?.toString() ?: "", target))
             }
         }
         editText.tag = watcher
@@ -193,28 +213,19 @@ class FileTreeAdapter(
                 (event != null && event.keyCode == android.view.KeyEvent.KEYCODE_ENTER)
             if (isEnterAction) {
                 val text = v.text.toString()
-                if (isRowValid(text, target)) {
+                val reason = validationReason(text, target)
+                if (reason == null) {
                     val existing = (target as? EditTarget.Rename)?.leaf
                     onNameConfirmed(existing, text)
-                    hideKeyboard(editText)
-                    true
                 } else {
-                    true
+                    shakeAndVibrateInvalid(editText)
                 }
+                true
             } else {
                 false
             }
         }
 
-        // FIX: removed the isKeyboardVisible() gate that was here — this
-        // is a deliberate, explicit user action (long-press Rename or
-        // tap "+"), not an automatic background trigger, and
-        // SHOW_IMPLICIT (unlike the SHOW_FORCED used for stdin
-        // activation) is a soft request that doesn't toggle an
-        // already-open keyboard closed. The gate was borrowed from a
-        // different flow where it didn't actually belong, and its
-        // underlying flag can be stale/wrong in the drawer's context —
-        // that's what was silently blocking the keyboard here.
         editText.requestFocus()
         editText.post {
             val imm = editText.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
@@ -222,21 +233,42 @@ class FileTreeAdapter(
         }
     }
 
-    private fun isRowValid(name: String, target: EditTarget): Boolean =
-        isValidExtension(name) && !isNameTaken(name, target)
-
-    private fun isValidExtension(name: String): Boolean = name.endsWith(".py") && name.length > 3
-
-    private fun applyBorder(editText: EditText, valid: Boolean) {
+    private fun applyValidationUi(editText: EditText, errorLabel: android.widget.TextView, reason: String?) {
+        val valid = reason == null
         editText.setBackgroundResource(
             if (valid) R.drawable.edit_row_border_normal else R.drawable.edit_row_border_invalid
         )
+        errorLabel.text = reason ?: ""
+        errorLabel.visibility = if (valid) View.GONE else View.VISIBLE
     }
 
-    private fun hideKeyboard(view: View) {
-        val imm = view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-        imm.hideSoftInputFromWindow(view.windowToken, 0)
+    /** Shake + 0.5s vibrate, synchronized — new feature for a failed
+     * save attempt (Enter, or tap-outside-confirm) while invalid. */
+    private fun shakeAndVibrateInvalid(editText: EditText) {
+        val amplitude = (8 * editText.context.resources.displayMetrics.density)
+        val animator = ObjectAnimator.ofFloat(
+            editText, "translationX",
+            0f, amplitude, -amplitude, amplitude, -amplitude, amplitude / 2f, -amplitude / 2f, 0f
+        )
+        animator.duration = 500
+        animator.start()
+        vibrate500(editText.context)
     }
+
+    private fun vibrate500(context: Context) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val manager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+                manager.defaultVibrator.vibrate(VibrationEffect.createOneShot(500, VibrationEffect.DEFAULT_AMPLITUDE))
+            } else {
+                @Suppress("DEPRECATION")
+                val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+                vibrator.vibrate(VibrationEffect.createOneShot(500, VibrationEffect.DEFAULT_AMPLITUDE))
+            }
+        } catch (t: Throwable) { /* haptics are a nice-to-have */ }
+    }
+
+    private fun isValidExtension(name: String): Boolean = name.endsWith(".py") && name.length > 3
 
     override fun getItemCount(): Int = flattenedRows.size
 }

@@ -60,7 +60,7 @@ class FileController(
             if (rootTreeUri == null) {
                 Toast.makeText(activity, "Open a folder first to create a file in it", Toast.LENGTH_SHORT).show()
             } else {
-                fileTreeAdapter.startCreatingNewFile()
+                fileTreeAdapter.startCreatingNewFile(computeDefaultNewFileName())
             }
         }
 
@@ -71,6 +71,23 @@ class FileController(
             }
             false
         }
+    }
+
+    /** New: computes "untitled.py", or "untitled(2).py", "untitled(3).py",
+     * etc. — whichever is the first name in that sequence not already
+     * present in the root folder — so a fresh "+" tap never starts on an
+     * already-red border. */
+    private fun computeDefaultNewFileName(): String {
+        val uri = rootTreeUri ?: return "untitled.py"
+        val root = DocumentFile.fromTreeUri(activity, uri) ?: return "untitled.py"
+
+        var candidate = "untitled.py"
+        var n = 2
+        while (root.findFile(candidate) != null) {
+            candidate = "untitled($n).py"
+            n++
+        }
+        return candidate
     }
 
     private fun hideKeyboard() {
@@ -200,8 +217,6 @@ class FileController(
 
     fun openFile(doc: DocumentFile) {
         checkUnsavedThenRun {
-            // Item 3 fix: reset any stale sideways-mode page offset FIRST,
-            // so the editor is guaranteed to actually be visible.
             onFileOpened()
 
             val content = workspace.readFile(doc)
@@ -211,10 +226,6 @@ class FileController(
             hasFileOpen = true
             notifyState()
             showEditorState()
-            // The line forcibly hiding the output panel here was removed —
-            // per item 1 the panel now always exists; hiding it was
-            // fighting that and, combined with the sideways-mode offset,
-            // was the direct cause of the reported "empty slate."
             editorController.clearErrorHighlightIfActive()
             activity.lifecycleScope.launch {
                 recentStore.addRecent(doc.uri.toString(), doc.name ?: "untitled.py")
@@ -376,12 +387,24 @@ class FileController(
         }
     }
 
+    /**
+     * FIX/feature: on a successful NEW-file creation, the file is now
+     * opened directly (closes the drawer, loads it into the editor) —
+     * matching the requested "save = open it" behavior. Rename keeps its
+     * previous behavior (stays in the list, no auto-open) since that
+     * wasn't part of this request.
+     */
     private fun handleNameConfirmed(existing: WorkspaceManager.FileNode.Leaf?, newName: String) {
         val uri = rootTreeUri ?: return
         if (existing == null) {
             val newDoc = workspace.createNewFileInTree(uri, newName)
-            if (newDoc == null) {
+            fileTreeAdapter.cancelEditing()
+            if (newDoc != null) {
+                refreshFolderBrowseViews()
+                openFile(newDoc)
+            } else {
                 Toast.makeText(activity, "Could not create file", Toast.LENGTH_SHORT).show()
+                refreshFolderBrowseViews()
             }
         } else {
             val normalizedNew = if (newName.endsWith(".py")) newName else "$newName.py"
@@ -391,9 +414,9 @@ class FileController(
                     Toast.makeText(activity, "Could not rename file", Toast.LENGTH_SHORT).show()
                 }
             }
+            fileTreeAdapter.cancelEditing()
+            refreshFolderBrowseViews()
         }
-        fileTreeAdapter.cancelEditing()
-        refreshFolderBrowseViews()
     }
 
     private fun showFileActionsPopup(leaf: WorkspaceManager.FileNode.Leaf, depth: Int, anchor: View) {

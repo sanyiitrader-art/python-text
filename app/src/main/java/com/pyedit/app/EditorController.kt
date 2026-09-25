@@ -68,11 +68,6 @@ class EditorController(
         imm.hideSoftInputFromWindow(editor.windowToken, 0)
     }
 
-    /**
-     * New (item 5's fix, called from OutputSheetController when a tap on
-     * the Editor page inside sideways mode is relayed through instead of
-     * being swallowed by the gesture overlay).
-     */
     fun requestFocusAndShowKeyboard() {
         editor.requestFocus()
         editor.post {
@@ -92,6 +87,22 @@ class EditorController(
         editor.setText(content)
         attachContentBehaviors()
         suppressContentCallback = false
+    }
+
+    /**
+     * New for Step 7 (Replace All): unlike loadText(), this is a real
+     * user-triggered edit and SHOULD mark the file dirty. Because
+     * editor.setText() replaces the Content object entirely, a listener
+     * added afterward can't retroactively see that one bulk change — so
+     * onUserEdit is invoked manually right after, rather than relying on
+     * the listener to catch it.
+     */
+    fun replaceAllText(newText: String) {
+        suppressContentCallback = true
+        editor.setText(newText)
+        attachContentBehaviors()
+        suppressContentCallback = false
+        onUserEdit?.invoke()
     }
 
     private fun attachContentBehaviors() {
@@ -124,6 +135,15 @@ class EditorController(
     fun jumpToLine(oneBasedLine: Int) {
         val zeroBasedLine = (oneBasedLine - 1).coerceIn(0, maxOf(0, editor.text.lineCount - 1))
         highlightErrorLine(zeroBasedLine)
+    }
+
+    /** New for Go to Line: plain cursor move, no red error highlight —
+     * jumpToLine() above is specifically for error navigation. */
+    fun moveCursorToLine(oneBasedLine: Int) {
+        val zeroBasedLine = (oneBasedLine - 1).coerceIn(0, maxOf(0, editor.text.lineCount - 1))
+        try {
+            editor.setSelection(zeroBasedLine, 0)
+        } catch (t: Throwable) { /* best-effort */ }
     }
 
     private fun highlightErrorLine(zeroBasedLine: Int) {

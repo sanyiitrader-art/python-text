@@ -73,10 +73,6 @@ class FileController(
         }
     }
 
-    /** New: computes "untitled.py", or "untitled(2).py", "untitled(3).py",
-     * etc. — whichever is the first name in that sequence not already
-     * present in the root folder — so a fresh "+" tap never starts on an
-     * already-red border. */
     private fun computeDefaultNewFileName(): String {
         val uri = rootTreeUri ?: return "untitled.py"
         val root = DocumentFile.fromTreeUri(activity, uri) ?: return "untitled.py"
@@ -172,9 +168,13 @@ class FileController(
         binding.mainWorkspaceView.groupFolderBrowse.visibility = View.VISIBLE
     }
 
+    /** FIX: output panel is now explicitly hidden here — this is the
+     * actual fix for the reported bug, since XML's default alone wasn't
+     * enough once any code path had ever shown it. */
     fun showEmptyState() {
         binding.mainWorkspaceView.root.visibility = View.VISIBLE
         binding.editorContainer.visibility = View.GONE
+        binding.outputPanel.root.visibility = View.GONE
         if (rootTreeUri == null) {
             binding.mainWorkspaceView.groupEmptyState.visibility = View.VISIBLE
             binding.mainWorkspaceView.groupFolderBrowse.visibility = View.GONE
@@ -184,9 +184,12 @@ class FileController(
         }
     }
 
+    /** FIX: explicitly shown here, exactly when a file actually opens —
+     * the only place the sheet should ever become visible. */
     fun showEditorState() {
         binding.mainWorkspaceView.root.visibility = View.GONE
         binding.editorContainer.visibility = View.VISIBLE
+        binding.outputPanel.root.visibility = View.VISIBLE
     }
 
     private fun setupMainWorkspaceView() {
@@ -387,13 +390,6 @@ class FileController(
         }
     }
 
-    /**
-     * FIX/feature: on a successful NEW-file creation, the file is now
-     * opened directly (closes the drawer, loads it into the editor) —
-     * matching the requested "save = open it" behavior. Rename keeps its
-     * previous behavior (stays in the list, no auto-open) since that
-     * wasn't part of this request.
-     */
     private fun handleNameConfirmed(existing: WorkspaceManager.FileNode.Leaf?, newName: String) {
         val uri = rootTreeUri ?: return
         if (existing == null) {

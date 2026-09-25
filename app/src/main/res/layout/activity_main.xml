@@ -89,10 +89,6 @@
             android:background="@color/border_divider"
             app:layout_constraintTop_toBottomOf="@id/top_bar" />
 
-        <!-- Item 4: page-indicator dots. GONE (zero height) unless the
-             output sheet is locked full-open in sideways mode; when GONE,
-             everything below simply sits right under the divider as
-             before, so this adds no visual change outside that mode. -->
         <LinearLayout
             android:id="@+id/page_indicator_bar"
             android:layout_width="match_parent"
@@ -140,24 +136,20 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent" />
 
-        <!-- Item 1: visible by default now (was gone), collapsed to just
-             the 28dp handle strip until dragged or Run is pressed. -->
+        <!-- FIX: default is now "gone" (was "visible") — this is what
+             let the sheet render on the empty/open-file-or-folder screen
+             before any file was ever opened. Visibility is now driven
+             entirely by FileController.showEmptyState()/showEditorState(). -->
         <include
             android:id="@+id/output_panel"
             layout="@layout/view_output_panel"
             android:layout_width="match_parent"
             android:layout_height="28dp"
-            android:visibility="visible"
+            android:visibility="gone"
             app:layout_constraintBottom_toTopOf="@id/python_toolbar"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent" />
 
-        <!-- Item 2 fix: dedicated gesture-capture overlay. Drawn AFTER
-             (on top of) output_panel, with no children of its own to
-             steal touches — this is what lets swipe/drag gestures work
-             once locked in full, since output_panel's own ScrollView and
-             EditText were intercepting them before. Only visible/active
-             while in sideways mode. -->
         <View
             android:id="@+id/sideways_gesture_overlay"
             android:layout_width="0dp"

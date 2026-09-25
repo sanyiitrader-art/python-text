@@ -27,6 +27,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var executionUiController: ExecutionUiController
     private lateinit var executionController: ExecutionController
     private lateinit var outputSheetController: OutputSheetController
+    private lateinit var findReplaceController: FindReplaceController
     private lateinit var editorSettings: EditorSettings
     private lateinit var workspace: WorkspaceManager
     private lateinit var recentStore: RecentFilesStore
@@ -54,8 +55,8 @@ class MainActivity : AppCompatActivity() {
         editorController = EditorController(this, binding, editorSettings, ::showCrashDiagnostic)
         editorController.setup()
 
-        // Item 5 wiring: relayed taps on the Editor page (inside sideways
-        // mode) call back into EditorController to focus + show keyboard.
+        findReplaceController = FindReplaceController(this, editorController)
+
         outputSheetController = OutputSheetController(
             activity = this,
             binding = binding,
@@ -186,10 +187,9 @@ class MainActivity : AppCompatActivity() {
             popupBinding.menuItemSaveAs.setOnClickListener { popup.dismiss(); fileController.showSaveAsDialog() }
             popupBinding.menuItemEditorSettings.setOnClickListener { popup.dismiss(); editorController.showEditorSettingsDialog() }
             popupBinding.menuItemCompile.setOnClickListener { popup.dismiss(); executionUiController.runCompileCheck() }
-            val dismissOnly = View.OnClickListener { popup.dismiss() }
-            popupBinding.menuItemFind.setOnClickListener(dismissOnly)
-            popupBinding.menuItemReplace.setOnClickListener(dismissOnly)
-            popupBinding.menuItemGoToLine.setOnClickListener(dismissOnly)
+            popupBinding.menuItemFind.setOnClickListener { popup.dismiss(); findReplaceController.showFindDialog() }
+            popupBinding.menuItemReplace.setOnClickListener { popup.dismiss(); findReplaceController.showReplaceDialog() }
+            popupBinding.menuItemGoToLine.setOnClickListener { popup.dismiss(); findReplaceController.showGoToLineDialog() }
         }
 
         popup.showAsDropDown(anchor, 0, 8)

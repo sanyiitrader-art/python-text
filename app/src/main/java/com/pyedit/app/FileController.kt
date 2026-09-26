@@ -96,6 +96,22 @@ class FileController(
         restoreLastSessionOrDefault()
     }
 
+    /**
+     * New for Phase 3 item 1: called from MainActivity.onPause() — saves
+     * the CURRENT cursor position for whatever file is open right now,
+     * so a process kill while backgrounded doesn't lose it. Deliberately
+     * NOT tied to autosave's debounce timer — this must fire immediately
+     * on pause, since there's no guarantee the debounced timer will ever
+     * get to run before the process dies.
+     */
+    fun persistCurrentCursorPosition() {
+        val doc = currentFileDoc ?: return
+        val (line, column) = editorController.getCursorPosition()
+        activity.lifecycleScope.launch {
+            recentStore.setCursorPosition(doc.uri.toString(), line, column)
+        }
+    }
+
     private fun markDirty() {
         if (!isDirty) {
             isDirty = true
@@ -168,9 +184,6 @@ class FileController(
         binding.mainWorkspaceView.groupFolderBrowse.visibility = View.VISIBLE
     }
 
-    /** FIX: output panel is now explicitly hidden here — this is the
-     * actual fix for the reported bug, since XML's default alone wasn't
-     * enough once any code path had ever shown it. */
     fun showEmptyState() {
         binding.mainWorkspaceView.root.visibility = View.VISIBLE
         binding.editorContainer.visibility = View.GONE
@@ -184,8 +197,6 @@ class FileController(
         }
     }
 
-    /** FIX: explicitly shown here, exactly when a file actually opens —
-     * the only place the sheet should ever become visible. */
     fun showEditorState() {
         binding.mainWorkspaceView.root.visibility = View.GONE
         binding.editorContainer.visibility = View.VISIBLE
@@ -218,6 +229,13 @@ class FileController(
         binding.mainWorkspaceView.btnOpenFile.setOnClickListener { launchOpenFile() }
     }
 
+    /**
+     * Updated for Phase 3 item 1: after loading the file's text, attempts
+     * to restore a previously-saved cursor position for THIS specific
+     * file (by URI) — not just for whatever was last-active overall.
+     * Falls back to leaving the cursor at its default (start of file)
+     * if nothing was ever saved for this file.
+     */
     fun openFile(doc: DocumentFile) {
         checkUnsavedThenRun {
             onFileOpened()
@@ -230,10 +248,17 @@ class FileController(
             notifyState()
             showEditorState()
             editorController.clearErrorHighlightIfActive()
+
             activity.lifecycleScope.launch {
                 recentStore.addRecent(doc.uri.toString(), doc.name ?: "untitled.py")
                 recentStore.setLastActiveFile(doc.uri.toString())
+
+                val savedPosition = recentStore.getCursorPosition(doc.uri.toString())
+                if (savedPosition != null) {
+                    editorController.restoreCursorPosition(savedPosition.first, savedPosition.second)
+                }
             }
+
             binding.drawerLayout.closeDrawers()
             checkRecoveryFor(doc)
         }
@@ -343,6 +368,12 @@ class FileController(
             hasFileOpen = true
             notifyState()
             showEditorState()
+
+            val savedPosition = recentStore.getCursorPosition(doc.uri.toString())
+            if (savedPosition != null) {
+                editorController.restoreCursorPosition(savedPosition.first, savedPosition.second)
+            }
+
             checkRecoveryFor(doc)
         } else {
             notifyState()

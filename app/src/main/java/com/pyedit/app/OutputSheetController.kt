@@ -28,19 +28,8 @@ class OutputSheetController(
     private var currentHeightPx = handleHeightPx
     private var isSidewaysMode = false
     private var isShowingOutputPage = true
-
-    // FIX: replaces the old "commit immediately on crossing the
-    // threshold" flag. This now means "currently past the threshold
-    // WHILE STILL DRAGGING" — a preview state only. Nothing about
-    // isSidewaysMode, translationX, or the handle/overlay swap happens
-    // here anymore; that's deferred entirely to ACTION_UP in
-    // commitFullOpen(). That's the actual fix: previously, reaching the
-    // threshold during ACTION_MOVE permanently locked everything in
-    // right then, so dragging back down before lifting your finger had
-    // nothing left to undo — the sheet's height kept following your
-    // finger, but the editor was already translated fully off-screen,
-    // which is exactly the blank "editor-colored space" you saw.
     private var previewingFullOpen = false
+    private var isDraggingHandle = false
 
     private var dragStartRawY = 0f
     private var dragStartHeightPx = 0
@@ -59,6 +48,24 @@ class OutputSheetController(
         binding.sidewaysGestureOverlay.setOnTouchListener { _, event ->
             handleSidewaysTouch(event)
             true
+        }
+
+        // FIX item 2: whenever the layout changes for ANY reason —
+        // keyboard opening/closing being the key case — re-check the
+        // sheet's height against the (possibly now smaller) available
+        // space and clamp it down if it would overflow. Previously this
+        // reclamping only happened during an active drag, so a sheet
+        // left expanded above the midpoint would keep its old absolute
+        // pixel height even after adjustResize shrank the root view for
+        // the keyboard, pushing it up through the top bar. Skipped while
+        // a drag is in progress so it can't fight the user's finger.
+        binding.root.viewTreeObserver.addOnGlobalLayoutListener {
+            if (isDraggingHandle) return@addOnGlobalLayoutListener
+            val previousContainerHeight = containerHeightPx
+            refreshContainerHeight()
+            if (containerHeightPx != previousContainerHeight && currentHeightPx > containerHeightPx) {
+                applyHeight(containerHeightPx)
+            }
         }
     }
 
@@ -83,6 +90,7 @@ class OutputSheetController(
     private fun handleDragTouch(event: MotionEvent) {
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
+                isDraggingHandle = true
                 refreshContainerHeight()
                 dragStartRawY = event.rawY
                 dragStartHeightPx = currentHeightPx
@@ -98,24 +106,19 @@ class OutputSheetController(
                 val fraction = newHeight.toFloat() / containerHeightPx.toFloat()
                 if (fraction >= fullOpenThresholdFraction) {
                     if (!previewingFullOpen) {
-                        // Haptic fires here, on first reaching the
-                        // threshold — still mid-drag, per the original
-                        // "vibrate when the sheet reaches the boundary"
-                        // requirement — not on release.
                         previewingFullOpen = true
                         vibrateOnce()
                         binding.pageIndicatorBar.visibility = View.VISIBLE
                     }
                 } else {
                     if (previewingFullOpen) {
-                        // Dragged back down below the threshold before
-                        // releasing — cancel the preview cleanly.
                         previewingFullOpen = false
                         binding.pageIndicatorBar.visibility = View.GONE
                     }
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                isDraggingHandle = false
                 if (previewingFullOpen) {
                     commitFullOpen()
                 } else if (!isSidewaysMode && currentHeightPx < collapseSnapBelowPx) {
@@ -161,9 +164,6 @@ class OutputSheetController(
         }
     }
 
-    /** Only reached from ACTION_UP/CANCEL while still previewing — this
-     * is the actual, real lock-in, now correctly deferred to finger
-     * release instead of happening mid-drag. */
     private fun commitFullOpen() {
         isSidewaysMode = true
         binding.outputPanel.dragHandleTouchArea.visibility = View.GONE

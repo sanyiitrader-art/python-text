@@ -169,15 +169,6 @@ class FileTreeAdapter(
         }
     }
 
-    /**
-     * FIX: split the old single "isValidExtension" check into three
-     * distinct, accurate reasons instead of one generic message covering
-     * all of them:
-     * - completely empty box
-     * - has ".py" but nothing before it (no actual filename)
-     * - has real text but wrong/missing extension
-     * - name collision (unchanged from before)
-     */
     private fun validationReason(name: String, target: EditTarget): String? {
         if (name.isEmpty()) return "Type a file name"
 
@@ -236,8 +227,16 @@ class FileTreeAdapter(
             }
         }
 
-        editText.requestFocus()
+        // FIX item 4: requestFocus() moved INSIDE the same posted block as
+        // showSoftInput, rather than called immediately during bind. When
+        // called immediately, the row's view may not yet be fully
+        // attached/laid out in the window (RecyclerView just created or
+        // recycled it this same frame), so the focus request could
+        // silently fail — and a showSoftInput on a view that never
+        // actually gained focus does nothing. Deferring both to the next
+        // frame, after layout has settled, is what makes this reliable.
         editText.post {
+            editText.requestFocus()
             val imm = editText.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
             imm.showSoftInput(editText, InputMethodManager.SHOW_IMPLICIT)
         }

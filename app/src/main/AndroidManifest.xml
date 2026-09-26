@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <uses-permission android:name="android.permission.VIBRATE" />
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -22,10 +24,6 @@
             </intent-filter>
         </activity>
 
-        <!-- Runs Python execution in its own process (spec's process-
-             isolation requirement, §78/§81): Stop can then simply kill
-             this process outright, instantly, regardless of what the
-             running script is doing — no fragile in-process interruption. -->
         <service
             android:name=".PythonExecutionService"
             android:process=":pyexec"

@@ -12,6 +12,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.drawerlayout.widget.DrawerLayout
 import androidx.lifecycle.lifecycleScope
 import com.pyedit.app.databinding.ActivityMainBinding
 import com.pyedit.app.databinding.PopupMenuBinding
@@ -102,6 +103,7 @@ class MainActivity : AppCompatActivity() {
 
         setupTopBar()
         setupOutsideTapDismiss()
+        setupDrawerKeyboardDismiss()
         updateActionAvailability(fileController.hasFileOpen)
 
         lifecycleScope.launch {
@@ -130,6 +132,26 @@ class MainActivity : AppCompatActivity() {
             }
             false
         }
+    }
+
+    /**
+     * FIX item 3: previously nothing hid the keyboard when the drawer
+     * opened, so a keyboard left up from typing in the editor stayed
+     * visible (and taking up screen space) even while browsing the
+     * unrelated Root Folder/Recent lists. Any subsequent rename/create
+     * action still explicitly calls showSoftInput itself, so this only
+     * clears an otherwise-stale keyboard, never blocks a real one.
+     */
+    private fun setupDrawerKeyboardDismiss() {
+        binding.drawerLayout.addDrawerListener(object : DrawerLayout.DrawerListener {
+            override fun onDrawerSlide(drawerView: View, slideOffset: Float) {}
+            override fun onDrawerOpened(drawerView: View) {
+                val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                imm.hideSoftInputFromWindow(drawerView.windowToken, 0)
+            }
+            override fun onDrawerClosed(drawerView: View) {}
+            override fun onDrawerStateChanged(newState: Int) {}
+        })
     }
 
     private fun setupTopBar() {

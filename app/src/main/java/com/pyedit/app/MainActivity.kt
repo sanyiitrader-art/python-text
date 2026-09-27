@@ -111,6 +111,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onPause() {
+        super.onPause()
+        // Phase 3 item 1: fires immediately on pause, not on the
+        // debounced autosave timer — a process kill while backgrounded
+        // has no guarantee that timer ever gets to run.
+        fileController.persistCurrentCursorPosition()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         executionController.teardown()
@@ -134,14 +142,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * FIX item 3: previously nothing hid the keyboard when the drawer
-     * opened, so a keyboard left up from typing in the editor stayed
-     * visible (and taking up screen space) even while browsing the
-     * unrelated Root Folder/Recent lists. Any subsequent rename/create
-     * action still explicitly calls showSoftInput itself, so this only
-     * clears an otherwise-stale keyboard, never blocks a real one.
-     */
     private fun setupDrawerKeyboardDismiss() {
         binding.drawerLayout.addDrawerListener(object : DrawerLayout.DrawerListener {
             override fun onDrawerSlide(drawerView: View, slideOffset: Float) {}
@@ -232,4 +232,4 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, "$title — editor still works. Tap to see details.", Toast.LENGTH_LONG).show()
         AlertDialog.Builder(this).setTitle(title).setMessage(sw.toString()).setPositiveButton("OK", null).show()
     }
-}
+}                                                                                                                                                                                                                       

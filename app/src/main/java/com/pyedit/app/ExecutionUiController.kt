@@ -30,6 +30,13 @@ class ExecutionUiController(
     var isRunning: Boolean = false
         private set
 
+    // Spec §75: avoid unbounded memory for indefinitely-running programs.
+    // A tight print-loop can produce output faster than a human could
+    // ever read anyway, so trimming old lines once the buffer gets large
+    // costs nothing real while capping worst-case memory growth.
+    private val maxOutputChars = 200_000
+    private val trimToChars = 150_000
+
     fun setup() {
         binding.outputPanel.tvOutputText.movementMethod = LinkMovementMethod.getInstance()
         binding.outputPanel.editStdin.setOnEditorActionListener { v, _, event ->
@@ -57,8 +64,6 @@ class ExecutionUiController(
             val scriptText = getScriptText()
             val name = getFileName()
             binding.outputPanel.tvOutputText.text = ""
-            // Delegate visibility + height entirely to OutputSheetController
-            // (spec §45-46: collapsed -> 25%, otherwise preserve height).
             onShowOutputPanel()
             isRunning = true
             onRunStateChanged(true)
@@ -113,11 +118,31 @@ class ExecutionUiController(
         }
     }
 
+    /**
+     * New: bounds the output buffer per spec §75. When the visible text
+     * exceeds maxOutputChars, the oldest content is trimmed down to
+     * trimToChars — done via a full re-set of the text (simplest correct
+     * approach) rather than a partial edit, since spans (header/error
+     * coloring) need to be dropped consistently along with the trimmed
+     * text, not left dangling on now-invalid ranges.
+     */
     private fun appendOutput(text: String) {
         binding.outputPanel.tvOutputText.append(text)
+        trimOutputIfNeeded()
         binding.outputPanel.outputScroll.post {
             binding.outputPanel.outputScroll.fullScroll(View.FOCUS_DOWN)
         }
+    }
+
+    private fun trimOutputIfNeeded() {
+        val current = binding.outputPanel.tvOutputText.text
+        if (current.length <= maxOutputChars) return
+        val cutFrom = current.length - trimToChars
+        // Cut at the next newline after cutFrom so we don't split a line
+        // in half, leaving a stray partial line at the top.
+        val newlineIndex = current.indexOf('\n', cutFrom)
+        val safeCut = if (newlineIndex != -1) newlineIndex + 1 else cutFrom
+        binding.outputPanel.tvOutputText.text = current.subSequence(safeCut, current.length)
     }
 
     private fun appendHeaderLine(text: String) {
@@ -128,6 +153,7 @@ class ExecutionUiController(
             0, text.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
         )
         binding.outputPanel.tvOutputText.append(spannable)
+        trimOutputIfNeeded()
         binding.outputPanel.outputScroll.post {
             binding.outputPanel.outputScroll.fullScroll(View.FOCUS_DOWN)
         }
@@ -141,6 +167,7 @@ class ExecutionUiController(
             0, summaryText.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
         )
         binding.outputPanel.tvOutputText.append(summarySpan)
+        trimOutputIfNeeded()
         binding.outputPanel.outputScroll.post {
             binding.outputPanel.outputScroll.fullScroll(View.FOCUS_DOWN)
         }

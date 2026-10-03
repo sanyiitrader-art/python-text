@@ -232,4 +232,4 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, "$title — editor still works. Tap to see details.", Toast.LENGTH_LONG).show()
         AlertDialog.Builder(this).setTitle(title).setMessage(sw.toString()).setPositiveButton("OK", null).show()
     }
-}                                                                                                                                                                                                                       
+}

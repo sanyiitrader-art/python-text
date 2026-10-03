@@ -4,6 +4,11 @@
     android:layout_height="match_parent"
     android:background="@color/editor_background">
 
+    <!-- Shown ONLY on the literal first-ever launch now (gated in
+         FileController via hasCompletedFirstLaunch). Recent-files
+         section removed entirely — redundant with the drawer's own
+         Recent section, and this screen no longer needs it since it
+         can't appear once there's any real history anyway. -->
     <LinearLayout
         android:id="@+id/group_empty_state"
         android:layout_width="match_parent"
@@ -29,10 +34,6 @@
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
-            <!-- Plain TextViews instead of MaterialButton: that widget's
-                 built-in text-color state list was silently overriding
-                 our explicit android:textColor. This matches the pattern
-                 already working elsewhere (popup menu items, "Clear"). -->
             <TextView
                 android:id="@+id/btn_open_folder"
                 android:layout_width="match_parent"
@@ -64,24 +65,10 @@
 
         </LinearLayout>
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/drawer_recent"
-            android:textStyle="bold"
-            android:textColor="@color/text_normal"
-            android:textSize="15sp"
-            android:layout_marginTop="36dp"
-            android:layout_marginBottom="8dp" />
-
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/rv_recent_files_main"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1" />
-
     </LinearLayout>
 
+    <!-- Shown for every return visit after the first launch when nothing
+         is currently open — whether or not a root folder is set. -->
     <LinearLayout
         android:id="@+id/group_folder_browse"
         android:layout_width="match_parent"

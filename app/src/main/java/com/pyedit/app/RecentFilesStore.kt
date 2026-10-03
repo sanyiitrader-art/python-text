@@ -1,6 +1,7 @@
 package com.pyedit.app
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -19,16 +20,19 @@ class RecentFilesStore(private val context: Context) {
         val LAST_ACTIVE = stringPreferencesKey("last_active_file")
         val AUTOSAVE_ENABLED = stringPreferencesKey("autosave_enabled")
         val ROOT_TREE_URI = stringPreferencesKey("root_tree_uri")
-        // New for Phase 3 item 1: per-file cursor position, keyed by
-        // that file's own URI so switching files doesn't clobber the
-        // position of whichever file you were in before.
         val CURSOR_POSITIONS = stringPreferencesKey("cursor_positions")
+        // New: set true the first time the user EVER successfully opens
+        // any file or folder. Deliberately independent of rootTreeUri/
+        // recentFiles — those can both become empty again later (a
+        // folder-less single-file user has no rootTreeUri; "Clear" wipes
+        // recentFiles) without this ever having been a fresh install.
+        val HAS_COMPLETED_FIRST_LAUNCH = booleanPreferencesKey("has_completed_first_launch")
     }
 
     private val fieldSep = "\u0001"
     private val entrySep = "\n"
     private val maxRecent = 20
-    private val maxCursorEntries = 50 // cap so this can't grow unbounded across a long editing history
+    private val maxCursorEntries = 50
 
     val recentFiles: Flow<List<RecentFile>> = context.dataStore.data.map { prefs ->
         parseRecent(prefs[Keys.RECENT] ?: "")
@@ -74,20 +78,10 @@ class RecentFilesStore(private val context: Context) {
         return prefs[Keys.AUTOSAVE_ENABLED]?.toBoolean() ?: false
     }
 
-    /**
-     * Records where the cursor was in a given file. Called on every
-     * background/pause (see MainActivity.onPause), not just on close, so
-     * a process kill mid-edit still has a recent-enough position saved.
-     * Safe if restoring later finds the file's content has changed
-     * (line/column are clamped against the actual line count by
-     * EditorController before being applied).
-     */
     suspend fun setCursorPosition(uriString: String, line: Int, column: Int) {
         context.dataStore.edit { prefs ->
             val current = parseCursorPositions(prefs[Keys.CURSOR_POSITIONS] ?: "").toMutableMap()
             current[uriString] = Pair(line, column)
-            // Trim oldest-inserted entries if over the cap — LinkedHashMap
-            // insertion order lets us just drop from the front.
             if (current.size > maxCursorEntries) {
                 val toRemove = current.keys.take(current.size - maxCursorEntries)
                 toRemove.forEach { current.remove(it) }
@@ -100,6 +94,15 @@ class RecentFilesStore(private val context: Context) {
         val prefs = context.dataStore.data.first()
         val map = parseCursorPositions(prefs[Keys.CURSOR_POSITIONS] ?: "")
         return map[uriString]
+    }
+
+    suspend fun setHasCompletedFirstLaunch() {
+        context.dataStore.edit { prefs -> prefs[Keys.HAS_COMPLETED_FIRST_LAUNCH] = true }
+    }
+
+    suspend fun hasCompletedFirstLaunch(): Boolean {
+        val prefs = context.dataStore.data.first()
+        return prefs[Keys.HAS_COMPLETED_FIRST_LAUNCH] ?: false
     }
 
     private fun parseRecent(raw: String): List<RecentFile> {

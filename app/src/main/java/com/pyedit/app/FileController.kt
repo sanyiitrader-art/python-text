@@ -42,10 +42,13 @@ class FileController(
     var autosaveEnabled: Boolean = false
         private set
 
+    // New: loaded once in init(), updated the moment a file/folder is
+    // first ever opened successfully.
+    private var hasCompletedFirstLaunch: Boolean = false
+
     private lateinit var fileTreeAdapter: FileTreeAdapter
     private lateinit var mainBrowseAdapter: FileTreeAdapter
     private lateinit var recentFilesAdapter: RecentFilesAdapter
-    private lateinit var mainRecentFilesAdapter: RecentFilesAdapter
 
     private val autosaveHandler = Handler(Looper.getMainLooper())
     private var autosaveRunnable: Runnable? = null
@@ -93,23 +96,24 @@ class FileController(
 
     suspend fun init() {
         autosaveEnabled = recentStore.isAutosaveEnabled()
+        hasCompletedFirstLaunch = recentStore.hasCompletedFirstLaunch()
         restoreLastSessionOrDefault()
     }
 
-    /**
-     * New for Phase 3 item 1: called from MainActivity.onPause() — saves
-     * the CURRENT cursor position for whatever file is open right now,
-     * so a process kill while backgrounded doesn't lose it. Deliberately
-     * NOT tied to autosave's debounce timer — this must fire immediately
-     * on pause, since there's no guarantee the debounced timer will ever
-     * get to run before the process dies.
-     */
     fun persistCurrentCursorPosition() {
         val doc = currentFileDoc ?: return
         val (line, column) = editorController.getCursorPosition()
         activity.lifecycleScope.launch {
             recentStore.setCursorPosition(doc.uri.toString(), line, column)
         }
+    }
+
+    /** Called once, the moment the user's first real open (file or
+     * folder) ever succeeds — cheap no-op on every call after that. */
+    private fun markFirstLaunchCompletedIfNeeded() {
+        if (hasCompletedFirstLaunch) return
+        hasCompletedFirstLaunch = true
+        activity.lifecycleScope.launch { recentStore.setHasCompletedFirstLaunch() }
     }
 
     private fun markDirty() {
@@ -151,6 +155,7 @@ class FileController(
             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
         )
         rootTreeUri = uri
+        markFirstLaunchCompletedIfNeeded()
         activity.lifecycleScope.launch { recentStore.setRootTreeUri(uri.toString()) }
         refreshFolderBrowseViews()
         showFolderBrowseState()
@@ -184,16 +189,28 @@ class FileController(
         binding.mainWorkspaceView.groupFolderBrowse.visibility = View.VISIBLE
     }
 
+    /**
+     * FIX: previously branched only on rootTreeUri (null -> full intro,
+     * set -> folder browse), which kept showing the full "fresh install"
+     * screen forever for anyone who only ever used Open File (never
+     * picked a folder). Now gated on hasCompletedFirstLaunch instead —
+     * the true one-time signal — with rootTreeUri only deciding whether
+     * the folder-browse list has anything in it to show.
+     */
     fun showEmptyState() {
         binding.mainWorkspaceView.root.visibility = View.VISIBLE
         binding.editorContainer.visibility = View.GONE
         binding.outputPanel.root.visibility = View.GONE
-        if (rootTreeUri == null) {
+
+        if (!hasCompletedFirstLaunch) {
             binding.mainWorkspaceView.groupEmptyState.visibility = View.VISIBLE
             binding.mainWorkspaceView.groupFolderBrowse.visibility = View.GONE
         } else {
             binding.mainWorkspaceView.groupEmptyState.visibility = View.GONE
             binding.mainWorkspaceView.groupFolderBrowse.visibility = View.VISIBLE
+            if (rootTreeUri != null) {
+                refreshFolderBrowseViews()
+            }
         }
     }
 
@@ -212,16 +229,9 @@ class FileController(
         )
         binding.mainWorkspaceView.rvFolderBrowseMain.layoutManager = LinearLayoutManager(activity)
         binding.mainWorkspaceView.rvFolderBrowseMain.adapter = mainBrowseAdapter
-
-        mainRecentFilesAdapter = RecentFilesAdapter { uriString ->
-            DocumentFile.fromSingleUri(activity, Uri.parse(uriString))?.let { openFile(it) }
-        }
-        binding.mainWorkspaceView.rvRecentFilesMain.layoutManager = LinearLayoutManager(activity)
-        binding.mainWorkspaceView.rvRecentFilesMain.adapter = mainRecentFilesAdapter
-
-        activity.lifecycleScope.launch {
-            recentStore.recentFiles.collect { list -> mainRecentFilesAdapter.submitList(list) }
-        }
+        // Recent-files list removed from this screen entirely — it's
+        // accessible via the drawer, and this screen no longer needs its
+        // own copy now that it's not the default landing state anymore.
     }
 
     fun bindOpenButtons(launchOpenFolder: () -> Unit, launchOpenFile: () -> Unit) {
@@ -229,16 +239,10 @@ class FileController(
         binding.mainWorkspaceView.btnOpenFile.setOnClickListener { launchOpenFile() }
     }
 
-    /**
-     * Updated for Phase 3 item 1: after loading the file's text, attempts
-     * to restore a previously-saved cursor position for THIS specific
-     * file (by URI) — not just for whatever was last-active overall.
-     * Falls back to leaving the cursor at its default (start of file)
-     * if nothing was ever saved for this file.
-     */
     fun openFile(doc: DocumentFile) {
         checkUnsavedThenRun {
             onFileOpened()
+            markFirstLaunchCompletedIfNeeded()
 
             val content = workspace.readFile(doc)
             editorController.loadText(content)

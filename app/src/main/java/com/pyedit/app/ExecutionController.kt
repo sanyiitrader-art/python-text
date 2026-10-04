@@ -24,6 +24,8 @@ class ExecutionController(private val context: Context) {
     private var serviceMessenger: Messenger? = null
     private var listener: Listener? = null
     private var bound = false
+    private var pendingReconnect = false
+    private var pendingStatusCallback: ((Boolean) -> Unit)? = null
 
     private val clientMessenger = Messenger(android.os.Handler(android.os.Looper.getMainLooper()) { msg ->
         when (msg.what) {
@@ -41,6 +43,11 @@ class ExecutionController(private val context: Context) {
                 val message = msg.data.getString(ExecutionProtocol.KEY_ERROR_MESSAGE) ?: ""
                 listener?.onError(line, type, message)
             }
+            ExecutionProtocol.MSG_STATUS_RESPONSE -> {
+                val running = msg.data.getString(ExecutionProtocol.KEY_TEXT)?.toBoolean() ?: false
+                pendingStatusCallback?.invoke(running)
+                pendingStatusCallback = null
+            }
         }
         true
     })
@@ -51,6 +58,10 @@ class ExecutionController(private val context: Context) {
             bound = true
             pendingScriptPath?.let { runInternal(it) }
             pendingScriptPath = null
+            if (pendingReconnect) {
+                pendingReconnect = false
+                sendRegister()
+            }
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
@@ -73,6 +84,47 @@ class ExecutionController(private val context: Context) {
             val intent = Intent(context, PythonExecutionService::class.java)
             context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
         }
+    }
+
+    /**
+     * New: call on app startup. Checks whether the :pyexec process is
+     * still alive from a PREVIOUS session (the process survives even
+     * after the UI's Activity/process is killed, since it's declared as
+     * a separate manifest process) — if so, reconnects this fresh
+     * ExecutionController to it and reports the real running state via
+     * onStatus, so the UI can restore Run/Stop button state and the
+     * output panel instead of incorrectly assuming nothing is running.
+     *
+     * Known limitation: any output the script produced while the UI was
+     * gone is lost — there's no buffer on the service side — only output
+     * from this point forward streams through again.
+     */
+    fun reconnectIfRunning(listener: Listener, onStatus: (running: Boolean) -> Unit) {
+        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val targetProcessName = "${context.packageName}:pyexec"
+        val isProcessAlive = am.runningAppProcesses?.any { it.processName == targetProcessName } == true
+
+        if (!isProcessAlive) {
+            onStatus(false)
+            return
+        }
+
+        this.listener = listener
+        pendingStatusCallback = onStatus
+
+        if (bound) {
+            sendRegister()
+        } else {
+            pendingReconnect = true
+            val intent = Intent(context, PythonExecutionService::class.java)
+            context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
+        }
+    }
+
+    private fun sendRegister() {
+        val msg = Message.obtain(null, ExecutionProtocol.MSG_REGISTER_CLIENT)
+        msg.replyTo = clientMessenger
+        serviceMessenger?.send(msg)
     }
 
     fun sendStdinLine(line: String) {

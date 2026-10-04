@@ -10,9 +10,11 @@ object ExecutionProtocol {
     const val MSG_EXITED = 12
     const val MSG_REGISTER_CLIENT = 13
     const val MSG_INPUT_REQUESTED = 14
-    // New: structured error info reported directly by Python (line/type/
-    // message), rather than parsed from raw traceback text on this side.
     const val MSG_ERROR = 15
+    // New: sent back immediately in response to MSG_REGISTER_CLIENT, so a
+    // freshly (re)launched UI can learn whether a script is still running
+    // in the background service from a previous session.
+    const val MSG_STATUS_RESPONSE = 16
 
     const val KEY_SCRIPT_PATH = "script_path"
     const val KEY_TEXT = "text"

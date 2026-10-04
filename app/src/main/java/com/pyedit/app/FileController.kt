@@ -42,8 +42,6 @@ class FileController(
     var autosaveEnabled: Boolean = false
         private set
 
-    // New: loaded once in init(), updated the moment a file/folder is
-    // first ever opened successfully.
     private var hasCompletedFirstLaunch: Boolean = false
 
     private lateinit var fileTreeAdapter: FileTreeAdapter
@@ -108,8 +106,6 @@ class FileController(
         }
     }
 
-    /** Called once, the moment the user's first real open (file or
-     * folder) ever succeeds — cheap no-op on every call after that. */
     private fun markFirstLaunchCompletedIfNeeded() {
         if (hasCompletedFirstLaunch) return
         hasCompletedFirstLaunch = true
@@ -124,10 +120,21 @@ class FileController(
         scheduleAutosaveAndRecovery()
     }
 
+    /**
+     * FIX (file-system edge case): previously assumed currentFileDoc was
+     * always still valid once opened. If the file is deleted or moved
+     * externally (another app, sync client, etc.) while open here,
+     * workspace.saveFile()/writeRecovery() against a now-dangling
+     * content:// URI could throw. Checking doc.exists() first makes
+     * autosave fail silently (editor content is preserved either way;
+     * nothing is lost) rather than risk an unhandled exception on a
+     * background-timer callback.
+     */
     private fun scheduleAutosaveAndRecovery() {
         autosaveRunnable?.let { autosaveHandler.removeCallbacks(it) }
         val runnable = Runnable {
             val doc = currentFileDoc ?: return@Runnable
+            if (!doc.exists()) return@Runnable
             val content = editorController.getText()
             workspace.writeRecovery(doc, content)
             if (autosaveEnabled) {
@@ -189,14 +196,6 @@ class FileController(
         binding.mainWorkspaceView.groupFolderBrowse.visibility = View.VISIBLE
     }
 
-    /**
-     * FIX: previously branched only on rootTreeUri (null -> full intro,
-     * set -> folder browse), which kept showing the full "fresh install"
-     * screen forever for anyone who only ever used Open File (never
-     * picked a folder). Now gated on hasCompletedFirstLaunch instead —
-     * the true one-time signal — with rootTreeUri only deciding whether
-     * the folder-browse list has anything in it to show.
-     */
     fun showEmptyState() {
         binding.mainWorkspaceView.root.visibility = View.VISIBLE
         binding.editorContainer.visibility = View.GONE
@@ -229,9 +228,6 @@ class FileController(
         )
         binding.mainWorkspaceView.rvFolderBrowseMain.layoutManager = LinearLayoutManager(activity)
         binding.mainWorkspaceView.rvFolderBrowseMain.adapter = mainBrowseAdapter
-        // Recent-files list removed from this screen entirely — it's
-        // accessible via the drawer, and this screen no longer needs its
-        // own copy now that it's not the default landing state anymore.
     }
 
     fun bindOpenButtons(launchOpenFolder: () -> Unit, launchOpenFile: () -> Unit) {
@@ -239,7 +235,18 @@ class FileController(
         binding.mainWorkspaceView.btnOpenFile.setOnClickListener { launchOpenFile() }
     }
 
+    /** FIX (file-system edge case): the doc being opened might itself
+     * have vanished between being listed and being tapped (e.g. deleted
+     * by another app a moment ago, or a stale Recent-files entry). Fails
+     * gracefully with a Toast and a refreshed listing instead of
+     * surfacing an empty/garbage read. */
     fun openFile(doc: DocumentFile) {
+        if (!doc.exists()) {
+            Toast.makeText(activity, "That file no longer exists", Toast.LENGTH_SHORT).show()
+            refreshFolderBrowseViews()
+            return
+        }
+
         checkUnsavedThenRun {
             onFileOpened()
             markFirstLaunchCompletedIfNeeded()
@@ -276,9 +283,15 @@ class FileController(
         )
     }
 
+    /** FIX: falls through to Save As if the current file has vanished
+     * out from under us, rather than attempting (and failing) to write
+     * to a now-dangling URI. */
     fun saveCurrentFile(onDone: () -> Unit = {}) {
         val doc = currentFileDoc
-        if (doc == null) { showSaveAsDialog(onDone); return }
+        if (doc == null || !doc.exists()) {
+            showSaveAsDialog(onDone)
+            return
+        }
         workspace.saveFile(doc, editorController.getText())
         workspace.clearRecovery(doc)
         isDirty = false
@@ -353,6 +366,9 @@ class FileController(
             .show()
     }
 
+    /** FIX: the restored last-active file might have been deleted
+     * externally while the app wasn't running — exists() check prevents
+     * trying to read a dangling URI on launch. */
     private suspend fun restoreLastSessionOrDefault() {
         val savedRootUri = recentStore.getRootTreeUri()?.let { Uri.parse(it) }
         if (savedRootUri != null) {

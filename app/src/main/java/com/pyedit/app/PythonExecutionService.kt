@@ -17,6 +17,13 @@ class PythonExecutionService : Service() {
     private var clientMessenger: Messenger? = null
     private val stdinQueue = LinkedBlockingQueue<String>()
 
+    // New: tracks whether a script is currently executing, independent
+    // of any particular client connection — this is what lets a freshly
+    // reconnected UI (after the app process was killed and relaunched)
+    // learn the real current state instead of assuming "not running".
+    @Volatile
+    private var isExecuting = false
+
     inner class StreamEmitter(private val what: Int) {
         fun write(s: String) {
             sendToClient(what, s)
@@ -30,7 +37,6 @@ class PythonExecutionService : Service() {
         }
     }
 
-    /** Called directly by pyedit_runner.py when an error/exception occurs. */
     inner class ErrorReporter {
         fun report(line: Int, errorType: String, message: String) {
             val messenger = clientMessenger ?: return
@@ -48,6 +54,7 @@ class PythonExecutionService : Service() {
         when (msg.what) {
             ExecutionProtocol.MSG_REGISTER_CLIENT -> {
                 clientMessenger = msg.replyTo
+                sendToClient(ExecutionProtocol.MSG_STATUS_RESPONSE, isExecuting.toString())
             }
             ExecutionProtocol.MSG_RUN -> {
                 clientMessenger = msg.replyTo
@@ -74,6 +81,7 @@ class PythonExecutionService : Service() {
     }
 
     private fun runScript(path: String) {
+        isExecuting = true
         thread(name = "pyedit-exec") {
             try {
                 val py = Python.getInstance()
@@ -89,6 +97,7 @@ class PythonExecutionService : Service() {
             } catch (t: Throwable) {
                 sendToClient(ExecutionProtocol.MSG_STDERR, "Execution error: ${t.message}\n")
             } finally {
+                isExecuting = false
                 sendToClient(ExecutionProtocol.MSG_EXITED, "")
             }
         }

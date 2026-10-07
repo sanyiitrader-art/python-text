@@ -16,8 +16,12 @@
 
     <color name="selection_overlay">#3365E6B3</color>
     <color name="error_highlight_overlay">#4DFF5C5C</color>
-
-    <!-- New: page-indicator dots (item 4) -->
     <color name="dot_inactive">#78857F</color>
     <color name="dot_active">#5A6662</color>
+
+    <!-- New: translucent brownish-red "eye comfort" screen tint,
+         layered over the entire UI (text/icons included) to mimic a
+         physical screen-filter app. -->
+    <color name="eye_comfort_overlay">#4D7A3B2E</color>
+    <color name="drawer_footer_background">#22292D</color>
 </resources>

@@ -50,22 +50,31 @@ class OutputSheetController(
             true
         }
 
-        // FIX item 2: whenever the layout changes for ANY reason —
-        // keyboard opening/closing being the key case — re-check the
-        // sheet's height against the (possibly now smaller) available
-        // space and clamp it down if it would overflow. Previously this
-        // reclamping only happened during an active drag, so a sheet
-        // left expanded above the midpoint would keep its old absolute
-        // pixel height even after adjustResize shrank the root view for
-        // the keyboard, pushing it up through the top bar. Skipped while
-        // a drag is in progress so it can't fight the user's finger.
+        /**
+         * FIX for items 2 & 5, rewritten with corrected behavior:
+         * - Partial-drag (normal) mode: height is now completely FROZEN
+         *   across keyboard toggles — nothing here touches it anymore.
+         *   This is exactly what was asked: the sheet stays at its exact
+         *   existing size no matter what the keyboard does. top_bar's
+         *   elevation (set in XML) is the safety net if this ever causes
+         *   the sheet to visually reach that high.
+         * - Sideways/full-open (locked-in) mode: by definition means
+         *   "always fills exactly the currently available space" — so
+         *   this DOES keep resizing it here, but now in BOTH directions
+         *   (grows back when the keyboard closes and more room appears,
+         *   not just shrinks when it opens) — that's what fixes item 5's
+         *   reported gap.
+         */
         binding.root.viewTreeObserver.addOnGlobalLayoutListener {
             if (isDraggingHandle) return@addOnGlobalLayoutListener
             val previousContainerHeight = containerHeightPx
             refreshContainerHeight()
-            if (containerHeightPx != previousContainerHeight && currentHeightPx > containerHeightPx) {
+            if (containerHeightPx == previousContainerHeight) return@addOnGlobalLayoutListener
+
+            if (isSidewaysMode) {
                 applyHeight(containerHeightPx)
             }
+            // else: intentionally nothing — frozen, per item 2.
         }
     }
 

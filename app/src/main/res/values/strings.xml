@@ -35,4 +35,8 @@
     <string name="action_delete">Delete</string>
     <string name="confirm_delete_title">Delete file</string>
     <string name="confirm_delete_message">Are you sure?</string>
+
+    <string name="footer_download_library">Download library</string>
+    <string name="footer_install_languages">Install other languages</string>
+    <string name="footer_settings">Settings</string>
 </resources>

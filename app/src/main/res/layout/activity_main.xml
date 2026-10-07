@@ -12,11 +12,16 @@
         android:layout_height="match_parent"
         android:background="@color/editor_background">
 
+        <!-- elevation added: guarantees the top bar always draws above
+             output_panel regardless of XML order, so it stays fully
+             usable even in the rare case the (now height-frozen) sheet
+             visually extends up near it. -->
         <androidx.constraintlayout.widget.ConstraintLayout
             android:id="@+id/top_bar"
             android:layout_width="match_parent"
             android:layout_height="56dp"
             android:background="@color/topbar_background"
+            android:elevation="6dp"
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent">
@@ -87,6 +92,7 @@
             android:layout_width="match_parent"
             android:layout_height="1dp"
             android:background="@color/border_divider"
+            android:elevation="6dp"
             app:layout_constraintTop_toBottomOf="@id/top_bar" />
 
         <LinearLayout
@@ -136,10 +142,6 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent" />
 
-        <!-- FIX: default is now "gone" (was "visible") — this is what
-             let the sheet render on the empty/open-file-or-folder screen
-             before any file was ever opened. Visibility is now driven
-             entirely by FileController.showEmptyState()/showEditorState(). -->
         <include
             android:id="@+id/output_panel"
             layout="@layout/view_output_panel"
@@ -169,6 +171,22 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintBottom_toBottomOf="parent" />
+
+        <!-- New (items 3/4): translucent eye-comfort tint, non-
+             interactive (not clickable/focusable, so Android's touch
+             dispatch automatically passes taps through to whatever is
+             beneath it), covering the entire main content area. -->
+        <View
+            android:id="@+id/eye_comfort_overlay"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:background="@color/eye_comfort_overlay"
+            android:clickable="false"
+            android:focusable="false"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 

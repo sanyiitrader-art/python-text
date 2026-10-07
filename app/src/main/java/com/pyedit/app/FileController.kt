@@ -120,16 +120,6 @@ class FileController(
         scheduleAutosaveAndRecovery()
     }
 
-    /**
-     * FIX (file-system edge case): previously assumed currentFileDoc was
-     * always still valid once opened. If the file is deleted or moved
-     * externally (another app, sync client, etc.) while open here,
-     * workspace.saveFile()/writeRecovery() against a now-dangling
-     * content:// URI could throw. Checking doc.exists() first makes
-     * autosave fail silently (editor content is preserved either way;
-     * nothing is lost) rather than risk an unhandled exception on a
-     * background-timer callback.
-     */
     private fun scheduleAutosaveAndRecovery() {
         autosaveRunnable?.let { autosaveHandler.removeCallbacks(it) }
         val runnable = Runnable {
@@ -235,11 +225,6 @@ class FileController(
         binding.mainWorkspaceView.btnOpenFile.setOnClickListener { launchOpenFile() }
     }
 
-    /** FIX (file-system edge case): the doc being opened might itself
-     * have vanished between being listed and being tapped (e.g. deleted
-     * by another app a moment ago, or a stale Recent-files entry). Fails
-     * gracefully with a Toast and a refreshed listing instead of
-     * surfacing an empty/garbage read. */
     fun openFile(doc: DocumentFile) {
         if (!doc.exists()) {
             Toast.makeText(activity, "That file no longer exists", Toast.LENGTH_SHORT).show()
@@ -283,9 +268,6 @@ class FileController(
         )
     }
 
-    /** FIX: falls through to Save As if the current file has vanished
-     * out from under us, rather than attempting (and failing) to write
-     * to a now-dangling URI. */
     fun saveCurrentFile(onDone: () -> Unit = {}) {
         val doc = currentFileDoc
         if (doc == null || !doc.exists()) {
@@ -366,9 +348,6 @@ class FileController(
             .show()
     }
 
-    /** FIX: the restored last-active file might have been deleted
-     * externally while the app wasn't running — exists() check prevents
-     * trying to read a dangling URI on launch. */
     private suspend fun restoreLastSessionOrDefault() {
         val savedRootUri = recentStore.getRootTreeUri()?.let { Uri.parse(it) }
         if (savedRootUri != null) {
@@ -421,8 +400,12 @@ class FileController(
             recentStore.recentFiles.collect { list -> recentFilesAdapter.submitList(list) }
         }
 
+        // FIX for item 4: passes the currently-open file's URI through,
+        // so Clear keeps that one entry instead of wiping everything.
         binding.drawerContent.tvClearRecent.setOnClickListener {
-            activity.lifecycleScope.launch { recentStore.clearRecent() }
+            activity.lifecycleScope.launch {
+                recentStore.clearRecent(currentFileDoc?.uri?.toString())
+            }
         }
     }
 

@@ -21,11 +21,6 @@ class RecentFilesStore(private val context: Context) {
         val AUTOSAVE_ENABLED = stringPreferencesKey("autosave_enabled")
         val ROOT_TREE_URI = stringPreferencesKey("root_tree_uri")
         val CURSOR_POSITIONS = stringPreferencesKey("cursor_positions")
-        // New: set true the first time the user EVER successfully opens
-        // any file or folder. Deliberately independent of rootTreeUri/
-        // recentFiles — those can both become empty again later (a
-        // folder-less single-file user has no rootTreeUri; "Clear" wipes
-        // recentFiles) without this ever having been a fresh install.
         val HAS_COMPLETED_FIRST_LAUNCH = booleanPreferencesKey("has_completed_first_launch")
     }
 
@@ -47,8 +42,21 @@ class RecentFilesStore(private val context: Context) {
         }
     }
 
-    suspend fun clearRecent() {
-        context.dataStore.edit { prefs -> prefs[Keys.RECENT] = "" }
+    /**
+     * FIX for item 4: now takes the currently-open file's URI (if any)
+     * and keeps ONLY that one entry, dropping everything else — rather
+     * than always wiping the list unconditionally.
+     */
+    suspend fun clearRecent(keepUriString: String?) {
+        context.dataStore.edit { prefs ->
+            if (keepUriString == null) {
+                prefs[Keys.RECENT] = ""
+            } else {
+                val current = parseRecent(prefs[Keys.RECENT] ?: "")
+                val kept = current.filter { it.uriString == keepUriString }
+                prefs[Keys.RECENT] = serializeRecent(kept)
+            }
+        }
     }
 
     suspend fun setLastActiveFile(uriString: String) {

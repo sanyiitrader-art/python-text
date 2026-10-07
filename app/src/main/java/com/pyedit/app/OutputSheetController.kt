@@ -31,6 +31,21 @@ class OutputSheetController(
     private var previewingFullOpen = false
     private var isDraggingHandle = false
 
+    /**
+     * FIX for item 1 — the actual correct model. "topOffsetPx" is the
+     * distance from the TOP of the sheet down to the BOTTOM of the
+     * container (i.e. containerHeightPx - currentHeightPx) at the last
+     * moment the user (or Run) deliberately set the sheet's size. This
+     * is the value that must stay constant across a keyboard toggle —
+     * NOT the height itself. When the container shrinks (keyboard
+     * appears) or grows (keyboard dismissed), height is recomputed as
+     * (newContainerHeight - topOffsetPx), which keeps the sheet's top
+     * edge pinned at the same absolute position and only moves/resizes
+     * the bottom edge to meet the keyboard — exactly "compress up to be
+     * visible end to end" while the top never moves.
+     */
+    private var topOffsetPx = 0
+
     private var dragStartRawY = 0f
     private var dragStartHeightPx = 0
 
@@ -50,21 +65,6 @@ class OutputSheetController(
             true
         }
 
-        /**
-         * FIX for items 2 & 5, rewritten with corrected behavior:
-         * - Partial-drag (normal) mode: height is now completely FROZEN
-         *   across keyboard toggles — nothing here touches it anymore.
-         *   This is exactly what was asked: the sheet stays at its exact
-         *   existing size no matter what the keyboard does. top_bar's
-         *   elevation (set in XML) is the safety net if this ever causes
-         *   the sheet to visually reach that high.
-         * - Sideways/full-open (locked-in) mode: by definition means
-         *   "always fills exactly the currently available space" — so
-         *   this DOES keep resizing it here, but now in BOTH directions
-         *   (grows back when the keyboard closes and more room appears,
-         *   not just shrinks when it opens) — that's what fixes item 5's
-         *   reported gap.
-         */
         binding.root.viewTreeObserver.addOnGlobalLayoutListener {
             if (isDraggingHandle) return@addOnGlobalLayoutListener
             val previousContainerHeight = containerHeightPx
@@ -72,9 +72,17 @@ class OutputSheetController(
             if (containerHeightPx == previousContainerHeight) return@addOnGlobalLayoutListener
 
             if (isSidewaysMode) {
-                applyHeight(containerHeightPx)
+                // Locked-in mode always fills everything available, both
+                // directions — unchanged from before.
+                applyHeight(containerHeightPx, updateOffset = false)
+            } else {
+                // The actual fix: recompute height from the FIXED top
+                // offset against the NEW container size, rather than
+                // leaving height untouched (which let the top edge drift)
+                // or refilling to full (which was the original bug).
+                val newHeight = (containerHeightPx - topOffsetPx).coerceIn(handleHeightPx, containerHeightPx)
+                applyHeight(newHeight, updateOffset = false)
             }
-            // else: intentionally nothing — frozen, per item 2.
         }
     }
 
@@ -110,7 +118,9 @@ class OutputSheetController(
                 val deltaY = dragStartRawY - event.rawY
                 val newHeight = (dragStartHeightPx + deltaY.toInt())
                     .coerceIn(handleHeightPx, containerHeightPx)
-                applyHeight(newHeight)
+                // A live drag is itself the user deliberately setting the
+                // size, so the offset tracks it continuously here.
+                applyHeight(newHeight, updateOffset = true)
 
                 val fraction = newHeight.toFloat() / containerHeightPx.toFloat()
                 if (fraction >= fullOpenThresholdFraction) {
@@ -131,18 +141,21 @@ class OutputSheetController(
                 if (previewingFullOpen) {
                     commitFullOpen()
                 } else if (!isSidewaysMode && currentHeightPx < collapseSnapBelowPx) {
-                    applyHeight(handleHeightPx)
+                    applyHeight(handleHeightPx, updateOffset = true)
                 }
                 previewingFullOpen = false
             }
         }
     }
 
-    private fun applyHeight(newHeightPx: Int) {
+    private fun applyHeight(newHeightPx: Int, updateOffset: Boolean) {
         currentHeightPx = newHeightPx
         val params = binding.outputPanel.root.layoutParams as ViewGroup.LayoutParams
         params.height = newHeightPx
         binding.outputPanel.root.layoutParams = params
+        if (updateOffset) {
+            topOffsetPx = containerHeightPx - newHeightPx
+        }
     }
 
     fun onRunRequested() {
@@ -161,14 +174,18 @@ class OutputSheetController(
         }
     }
 
+    /** Deliberate target change — updates topOffsetPx once up front using
+     * the intended final height, so subsequent keyboard toggles respect
+     * this new committed size, not the pre-animation one. */
     private fun animateToHeight(targetHeightPx: Int) {
+        topOffsetPx = containerHeightPx - targetHeightPx
         val start = currentHeightPx
         val steps = 10
         val diff = targetHeightPx - start
         val handler = android.os.Handler(android.os.Looper.getMainLooper())
         for (i in 1..steps) {
             handler.postDelayed({
-                applyHeight(start + diff * i / steps)
+                applyHeight(start + diff * i / steps, updateOffset = false)
             }, (i * 18).toLong())
         }
     }
@@ -180,7 +197,7 @@ class OutputSheetController(
         binding.pageIndicatorBar.visibility = View.VISIBLE
 
         refreshContainerHeight()
-        applyHeight(containerHeightPx)
+        applyHeight(containerHeightPx, updateOffset = false)
         binding.editorContainer.translationX = -screenWidth().toFloat()
         binding.outputPanel.root.translationX = 0f
         setActivePage(showingOutput = true)

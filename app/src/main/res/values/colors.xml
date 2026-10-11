@@ -9,7 +9,8 @@
     <color name="output_background">#0B0D0E</color>
     <color name="popup_background">#1C2023</color>
     <color name="border_divider">#292F2D</color>
-    <color name="cursor_color">#65E6B3</color>
+    <!-- Item 7: text cursor is now grey -->
+    <color name="cursor_color">#A0A9A6</color>
     <color name="error_color">#FF5C5C</color>
     <color name="warning_color">#FFC857</color>
     <color name="success_color">#58D68D</color>
@@ -19,9 +20,9 @@
     <color name="dot_inactive">#78857F</color>
     <color name="dot_active">#5A6662</color>
 
-    <!-- New: translucent brownish-red "eye comfort" screen tint,
-         layered over the entire UI (text/icons included) to mimic a
-         physical screen-filter app. -->
     <color name="eye_comfort_overlay">#4D7A3B2E</color>
     <color name="drawer_footer_background">#22292D</color>
+
+    <!-- Item 7: the grey that replaces mint on the listed elements -->
+    <color name="accent_grey">#A0A9A6</color>
 </resources>

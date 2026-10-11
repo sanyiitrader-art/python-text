@@ -12,8 +12,7 @@
         <item name="android:windowLightStatusBar">false</item>
     </style>
 
-    <!-- Renamed without dots: "PopupMenu.SectionLabel" etc. would make
-         AAPT look for an implicit non-existent parent style "PopupMenu". -->
+    <!-- Item 7: section labels (File, Editing, Python, Settings) grey -->
     <style name="PopupMenuSectionLabel">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
@@ -21,7 +20,7 @@
         <item name="android:paddingEnd">16dp</item>
         <item name="android:paddingTop">8dp</item>
         <item name="android:paddingBottom">4dp</item>
-        <item name="android:textColor">@color/mint_primary</item>
+        <item name="android:textColor">@color/accent_grey</item>
         <item name="android:textSize">12sp</item>
         <item name="android:textStyle">bold</item>
     </style>
@@ -67,12 +66,14 @@
         <item name="android:tint">@color/text_normal</item>
     </style>
 
+    <!-- Item 7: coder-friendly text keys are grey now; the icon keys
+         (indent, outdent, undo, redo) use ToolbarKey and stay white. -->
     <style name="ToolbarTextKey">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">40dp</item>
         <item name="android:minWidth">36dp</item>
         <item name="android:gravity">center</item>
-        <item name="android:textColor">@color/mint_primary</item>
+        <item name="android:textColor">@color/accent_grey</item>
         <item name="android:textSize">15sp</item>
         <item name="android:background">?attr/selectableItemBackgroundBorderless</item>
     </style>

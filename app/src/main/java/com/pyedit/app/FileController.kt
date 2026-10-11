@@ -14,12 +14,14 @@ import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.documentfile.provider.DocumentFile
+import androidx.drawerlayout.widget.DrawerLayout
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.pyedit.app.databinding.ActivityMainBinding
 import com.pyedit.app.databinding.DialogSaveAsBinding
 import com.pyedit.app.databinding.DialogUnsavedExitBinding
 import com.pyedit.app.databinding.PopupFileActionsBinding
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class FileController(
@@ -54,7 +56,13 @@ class FileController(
 
     private val maxVisibleRecentRows = 4
 
+    private data class Draft(val recent: RecentFilesStore.RecentFile, val doc: DocumentFile, val content: String)
+
     fun setup() {
+        // Item 2: the main plate stays hidden until init() has decided
+        // what to show, so the first-launch buttons can never flash.
+        binding.mainWorkspaceView.root.visibility = View.GONE
+
         editorController.onContentChanged { markDirty() }
         setupDrawerLists()
         setupMainWorkspaceView()
@@ -67,13 +75,40 @@ class FileController(
             }
         }
 
+        // Item 6: Cancel / Save buttons shown while naming
+        binding.drawerContent.btnNamingCancel.setOnClickListener { cancelNaming() }
+        binding.drawerContent.btnNamingSave.setOnClickListener { fileTreeAdapter.confirmCurrentEditIfValid() }
+
+        // Item 6: tapping any non-reactive spot now CANCELS naming
+        // (it used to try to save).
         binding.drawerContent.root.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
-                fileTreeAdapter.confirmCurrentEditIfValid()
+                cancelNaming()
                 hideKeyboard()
             }
             false
         }
+        binding.drawerContent.rvFileTree.setOnTouchListener { _, event ->
+            if (event.action == MotionEvent.ACTION_DOWN) cancelNaming()
+            false
+        }
+
+        // Closing the drawer by any route also cancels an unfinished naming.
+        binding.drawerLayout.addDrawerListener(object : DrawerLayout.SimpleDrawerListener() {
+            override fun onDrawerClosed(drawerView: View) { cancelNaming() }
+        })
+    }
+
+    private fun cancelNaming() {
+        if (::fileTreeAdapter.isInitialized && fileTreeAdapter.isEditing()) {
+            fileTreeAdapter.cancelEditing()
+        }
+    }
+
+    private fun setNamingMode(active: Boolean) {
+        binding.drawerContent.btnDrawerAdd.visibility = if (active) View.GONE else View.VISIBLE
+        binding.drawerContent.tvRootFolderName.visibility = if (active) View.GONE else View.VISIBLE
+        binding.drawerContent.namingActions.visibility = if (active) View.VISIBLE else View.GONE
     }
 
     private fun computeDefaultNewFileName(): String {
@@ -100,11 +135,36 @@ class FileController(
         restoreLastSessionOrDefault()
     }
 
+    /**
+     * Called from MainActivity.onPause. Besides the cursor position it
+     * now also stores the unsaved text (item 2), so killing the app
+     * brings the file back exactly as it was.
+     */
     fun persistCurrentCursorPosition() {
         val doc = currentFileDoc ?: return
+        persistDraftIfDirty()
         val (line, column) = editorController.getCursorPosition()
         activity.lifecycleScope.launch {
             recentStore.setCursorPosition(doc.uri.toString(), line, column)
+        }
+    }
+
+    /**
+     * Items 2-4: unsaved text is kept as a per-file draft (never written
+     * to the real file unless autosave is on). With autosave on it goes
+     * to disk instead.
+     */
+    private fun persistDraftIfDirty() {
+        val doc = currentFileDoc ?: return
+        if (!isDirty || !doc.exists()) return
+        val content = editorController.getText()
+        if (autosaveEnabled) {
+            workspace.saveFile(doc, content)
+            workspace.clearRecovery(doc)
+            isDirty = false
+            notifyState()
+        } else {
+            workspace.writeRecovery(doc, content)
         }
     }
 
@@ -145,8 +205,6 @@ class FileController(
         val display = if (isDirty) "$name *" else name
         onStateChanged(hasFileOpen, isDirty, display)
 
-        // Item 6: keep the drawer's Recent list pinned/highlighted to
-        // whatever is open right now (no-op if unchanged).
         if (::recentFilesAdapter.isInitialized) {
             recentFilesAdapter.setCurrentUri(currentFileDoc?.uri?.toString())
             updateRecentListHeight()
@@ -191,6 +249,7 @@ class FileController(
     }
 
     private fun showFolderBrowseState() {
+        binding.mainWorkspaceView.root.visibility = View.VISIBLE
         binding.mainWorkspaceView.groupEmptyState.visibility = View.GONE
         binding.mainWorkspaceView.groupFolderBrowse.visibility = View.VISIBLE
     }
@@ -234,6 +293,22 @@ class FileController(
         binding.mainWorkspaceView.btnOpenFile.setOnClickListener { launchOpenFile() }
     }
 
+    /**
+     * Loads a file, preferring its stored unsaved draft over the disk
+     * content (items 2, 3, 4). The draft stays unsaved: the file is
+     * marked dirty, nothing is written to disk.
+     */
+    private fun loadFileIntoEditor(doc: DocumentFile) {
+        val draft = workspace.readRecoveryIfDifferent(doc)
+        editorController.loadText(draft ?: workspace.readFile(doc))
+        currentFileDoc = doc
+        isDirty = draft != null
+        hasFileOpen = true
+    }
+
+    /** Items 3 + 4: switching files no longer asks anything. The file
+     * being left keeps its unsaved text as a draft, and any file that
+     * has a draft opens with it — from any list. */
     fun openFile(doc: DocumentFile) {
         if (!doc.exists()) {
             Toast.makeText(activity, "That file no longer exists", Toast.LENGTH_SHORT).show()
@@ -241,40 +316,28 @@ class FileController(
             return
         }
 
-        checkUnsavedThenRun {
-            onFileOpened()
-            markFirstLaunchCompletedIfNeeded()
+        persistDraftIfDirty()
+        autosaveRunnable?.let { autosaveHandler.removeCallbacks(it) }
 
-            val content = workspace.readFile(doc)
-            editorController.loadText(content)
-            currentFileDoc = doc
-            isDirty = false
-            hasFileOpen = true
-            notifyState()
-            showEditorState()
-            editorController.clearErrorHighlightIfActive()
+        onFileOpened()
+        markFirstLaunchCompletedIfNeeded()
 
-            activity.lifecycleScope.launch {
-                recentStore.addRecent(doc.uri.toString(), doc.name ?: "untitled.py")
-                recentStore.setLastActiveFile(doc.uri.toString())
+        loadFileIntoEditor(doc)
+        notifyState()
+        showEditorState()
+        editorController.clearErrorHighlightIfActive()
 
-                val savedPosition = recentStore.getCursorPosition(doc.uri.toString())
-                if (savedPosition != null) {
-                    editorController.restoreCursorPosition(savedPosition.first, savedPosition.second)
-                }
+        activity.lifecycleScope.launch {
+            recentStore.addRecent(doc.uri.toString(), doc.name ?: "untitled.py")
+            recentStore.setLastActiveFile(doc.uri.toString())
+
+            val savedPosition = recentStore.getCursorPosition(doc.uri.toString())
+            if (savedPosition != null) {
+                editorController.restoreCursorPosition(savedPosition.first, savedPosition.second)
             }
-
-            binding.drawerLayout.closeDrawers()
-            checkRecoveryFor(doc)
         }
-    }
 
-    private fun checkUnsavedThenRun(action: () -> Unit) {
-        if (!isDirty) { action(); return }
-        showUnsavedExitDialog(
-            onSave = { saveCurrentFile { action() } },
-            onDiscard = { isDirty = false; action() }
-        )
+        binding.drawerLayout.closeDrawers()
     }
 
     fun saveCurrentFile(onDone: () -> Unit = {}) {
@@ -332,29 +395,20 @@ class FileController(
         dialog.show()
     }
 
+    /** Back-press exit keeps its warning; Discard now also deletes the
+     * draft so it can't come back on the next launch. */
     fun checkUnsavedThenExit(proceed: () -> Unit) {
         if (isDirty) {
             showUnsavedExitDialog(
                 onSave = { saveCurrentFile { proceed() } },
-                onDiscard = { proceed() }
+                onDiscard = {
+                    currentFileDoc?.let { workspace.clearRecovery(it) }
+                    proceed()
+                }
             )
         } else {
             proceed()
         }
-    }
-
-    private fun checkRecoveryFor(doc: DocumentFile) {
-        val recoveryContent = workspace.readRecoveryIfDifferent(doc) ?: return
-        AlertDialog.Builder(activity)
-            .setTitle("Unsaved work recovered")
-            .setMessage("A previous session for ${doc.name} has unsaved changes. Restore them?")
-            .setPositiveButton("Restore") { _, _ ->
-                editorController.loadText(recoveryContent)
-                isDirty = true
-                notifyState()
-            }
-            .setNegativeButton("Discard") { _, _ -> workspace.clearRecovery(doc) }
-            .show()
     }
 
     private suspend fun restoreLastSessionOrDefault() {
@@ -369,11 +423,7 @@ class FileController(
             ?.takeIf { it.exists() }
 
         if (doc != null) {
-            val content = workspace.readFile(doc)
-            editorController.loadText(content)
-            currentFileDoc = doc
-            isDirty = false
-            hasFileOpen = true
+            loadFileIntoEditor(doc)
             notifyState()
             showEditorState()
 
@@ -381,8 +431,6 @@ class FileController(
             if (savedPosition != null) {
                 editorController.restoreCursorPosition(savedPosition.first, savedPosition.second)
             }
-
-            checkRecoveryFor(doc)
         } else {
             notifyState()
             showEmptyState()
@@ -394,15 +442,13 @@ class FileController(
             onFileClick = { leaf -> openFile(leaf.doc) },
             onFileLongPress = { leaf, depth, anchor -> showFileActionsPopup(leaf, depth, anchor) },
             onNameConfirmed = { existing, newName -> handleNameConfirmed(existing, newName) },
-            isNameTaken = { candidateName, target -> isNameTaken(candidateName, target) }
+            isNameTaken = { candidateName, target -> isNameTaken(candidateName, target) },
+            onEditingStateChanged = { editing -> setNamingMode(editing) }
         )
         val treeRv = binding.drawerContent.rvFileTree
         treeRv.layoutManager = LinearLayoutManager(activity)
         treeRv.adapter = fileTreeAdapter
 
-        // Item 4: pad the file list's bottom by the footer's height
-        // (kept in sync if it ever changes) so the last rows can be
-        // scrolled up above the overlaid footer.
         treeRv.clipToPadding = false
         binding.drawerContent.drawerFooter.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
             if (treeRv.paddingBottom != v.height) {
@@ -423,19 +469,48 @@ class FileController(
             }
         }
 
-        binding.drawerContent.tvClearRecent.setOnClickListener {
-            activity.lifecycleScope.launch {
-                recentStore.clearRecent(currentFileDoc?.uri?.toString())
-            }
-        }
+        binding.drawerContent.tvClearRecent.setOnClickListener { onClearRecentClicked() }
     }
 
     /**
-     * Item 5: up to 4 rows the Recent list simply wraps its content;
-     * beyond that it's fixed at exactly 4 rows tall and scrolls inside
-     * that space, so it can no longer push the Root Folder section down
-     * the drawer.
+     * Item 5: Clear warns only when it would throw away unsaved text of
+     * files OTHER than the open one. Save writes those drafts to disk
+     * first; Discard deletes them; the open file is never touched.
      */
+    private fun onClearRecentClicked() {
+        activity.lifecycleScope.launch {
+            val currentUri = currentFileDoc?.uri?.toString()
+            val recents = recentStore.recentFiles.first()
+
+            val drafts = recents.filter { it.uriString != currentUri }.mapNotNull { r ->
+                val doc = DocumentFile.fromSingleUri(activity, Uri.parse(r.uriString))
+                    ?: return@mapNotNull null
+                if (!doc.exists()) return@mapNotNull null
+                val content = workspace.readRecoveryIfDifferent(doc) ?: return@mapNotNull null
+                Draft(r, doc, content)
+            }
+
+            if (drafts.isEmpty()) {
+                recentStore.clearRecent(currentUri)
+                return@launch
+            }
+
+            showUnsavedExitDialog(
+                onSave = {
+                    drafts.forEach {
+                        workspace.saveFile(it.doc, it.content)
+                        workspace.clearRecovery(it.doc)
+                    }
+                    activity.lifecycleScope.launch { recentStore.clearRecent(currentUri) }
+                },
+                onDiscard = {
+                    drafts.forEach { workspace.clearRecovery(it.doc) }
+                    activity.lifecycleScope.launch { recentStore.clearRecent(currentUri) }
+                }
+            )
+        }
+    }
+
     private fun updateRecentListHeight() {
         val rv = binding.drawerContent.rvRecentFiles
         rv.post {
@@ -520,6 +595,7 @@ class FileController(
             .setPositiveButton(R.string.action_delete) { _, _ ->
                 val deleted = workspace.deleteFile(leaf.doc)
                 if (deleted) {
+                    workspace.clearRecovery(leaf.doc)
                     if (currentFileDoc?.uri == leaf.doc.uri) {
                         currentFileDoc = null
                         hasFileOpen = false

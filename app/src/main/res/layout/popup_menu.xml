@@ -25,11 +25,12 @@
             android:text="@string/menu_autosave"
             android:textColor="@color/text_normal"
             android:textSize="14sp" />
+        <!-- Item 7: checkbox tint grey -->
         <CheckBox
             android:id="@+id/checkbox_autosave"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:buttonTint="@color/mint_primary" />
+            android:buttonTint="@color/accent_grey" />
     </LinearLayout>
 
     <View style="@style/PopupMenuDivider" />

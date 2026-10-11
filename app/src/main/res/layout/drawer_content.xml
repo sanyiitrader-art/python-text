@@ -41,15 +41,18 @@
 
     </LinearLayout>
 
-    <!-- Item 5: no maxHeight (it doesn't apply to RecyclerView anyway).
-         FileController caps this to 4 rows in code and lets it scroll
-         inside that space. -->
+    <!-- Item 1: thumb only (no track); drawn only while the list is
+         actually scrollable. -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/rv_recent_files"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:paddingStart="8dp"
-        android:paddingEnd="8dp" />
+        android:paddingEnd="8dp"
+        android:scrollbars="vertical"
+        android:scrollbarSize="3dp"
+        android:scrollbarThumbVertical="@drawable/scrollbar_thumb"
+        android:fadeScrollbars="false" />
 
     <View
         android:layout_width="match_parent"
@@ -57,6 +60,9 @@
         android:layout_marginTop="8dp"
         android:background="@color/border_divider" />
 
+    <!-- Root Folder row. While a file is being named, the "+" and the
+         folder name hide and the Cancel/Save buttons take their place
+         (item 6). -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -89,14 +95,52 @@
             android:textColor="@color/text_comment"
             android:textSize="13sp" />
 
+        <!-- Item 7: "+" is white -->
         <ImageButton
             android:id="@+id/btn_drawer_add"
             android:layout_width="36dp"
             android:layout_height="36dp"
             android:src="@drawable/ic_add"
             android:background="?attr/selectableItemBackgroundBorderless"
-            app:tint="@color/mint_primary"
+            app:tint="@color/text_normal"
             android:contentDescription="New file" />
+
+        <LinearLayout
+            android:id="@+id/naming_actions"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="end|center_vertical"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/btn_naming_cancel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Cancel"
+                android:textStyle="bold"
+                android:textColor="@color/text_normal"
+                android:textSize="14sp"
+                android:padding="8dp"
+                android:background="?attr/selectableItemBackground"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <TextView
+                android:id="@+id/btn_naming_save"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Save"
+                android:textStyle="bold"
+                android:textColor="@color/mint_primary"
+                android:textSize="14sp"
+                android:padding="8dp"
+                android:background="?attr/selectableItemBackground"
+                android:clickable="true"
+                android:focusable="true" />
+
+        </LinearLayout>
 
     </LinearLayout>
 
@@ -118,16 +162,17 @@
         android:layout_height="0dp"
         android:layout_weight="1">
 
-        <!-- Item 4: clipToPadding=false; FileController sets bottom
-             padding = footer height so the last rows can scroll up
-             clear of the footer instead of getting stuck under it. -->
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/rv_file_tree"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:clipToPadding="false"
             android:paddingStart="8dp"
-            android:paddingEnd="8dp" />
+            android:paddingEnd="8dp"
+            android:scrollbars="vertical"
+            android:scrollbarSize="3dp"
+            android:scrollbarThumbVertical="@drawable/scrollbar_thumb"
+            android:fadeScrollbars="false" />
 
         <LinearLayout
             android:id="@+id/drawer_footer"

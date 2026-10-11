@@ -4,11 +4,6 @@
     android:layout_height="match_parent"
     android:background="@color/editor_background">
 
-    <!-- Shown ONLY on the literal first-ever launch now (gated in
-         FileController via hasCompletedFirstLaunch). Recent-files
-         section removed entirely — redundant with the drawer's own
-         Recent section, and this screen no longer needs it since it
-         can't appear once there's any real history anyway. -->
     <LinearLayout
         android:id="@+id/group_empty_state"
         android:layout_width="match_parent"
@@ -34,12 +29,13 @@
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
+            <!-- Item 7: button words are grey now -->
             <TextView
                 android:id="@+id/btn_open_folder"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="@string/open_folder"
-                android:textColor="@color/mint_primary"
+                android:textColor="@color/accent_grey"
                 android:textSize="15sp"
                 android:gravity="center"
                 android:background="@drawable/popup_bg"
@@ -54,7 +50,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="@string/open_file"
-                android:textColor="@color/mint_primary"
+                android:textColor="@color/accent_grey"
                 android:textSize="15sp"
                 android:gravity="center"
                 android:background="@drawable/popup_bg"
@@ -67,8 +63,6 @@
 
     </LinearLayout>
 
-    <!-- Shown for every return visit after the first launch when nothing
-         is currently open — whether or not a root folder is set. -->
     <LinearLayout
         android:id="@+id/group_folder_browse"
         android:layout_width="match_parent"

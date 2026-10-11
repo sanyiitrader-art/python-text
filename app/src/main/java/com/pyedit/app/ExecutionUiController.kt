@@ -14,6 +14,7 @@ import androidx.appcompat.app.AppCompatActivity
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import com.pyedit.app.databinding.ActivityMainBinding
+import java.util.Locale
 
 class ExecutionUiController(
     private val activity: AppCompatActivity,
@@ -33,6 +34,10 @@ class ExecutionUiController(
     private val maxOutputChars = 200_000
     private val trimToChars = 150_000
 
+    // Item 8: real elapsed time + whether the script raised an error.
+    private var runStartNanos = 0L
+    private var hadError = false
+
     fun setup() {
         binding.outputPanel.tvOutputText.movementMethod = LinkMovementMethod.getInstance()
         binding.outputPanel.editStdin.setOnEditorActionListener { v, _, event ->
@@ -48,14 +53,12 @@ class ExecutionUiController(
             }
         }
 
-        // New: on every app start, check whether a script from a
-        // previous session is still running in the background and
-        // restore UI state to match reality instead of defaulting to
-        // "not running".
         executionController.reconnectIfRunning(buildListener()) { running ->
             activity.runOnUiThread {
                 if (running) {
                     isRunning = true
+                    runStartNanos = 0L // real start time is unknown after a relaunch
+                    hadError = false
                     onRunStateChanged(true)
                     onShowOutputPanel()
                     appendOutput("\n[Reconnected — program is still running]\n")
@@ -70,13 +73,15 @@ class ExecutionUiController(
             isRunning = false
             onRunStateChanged(false)
             setStdinActive(false)
-            appendOutput("\n[Stopped]\n")
+            appendStatusLine("\u25A0 you stopped execution", R.color.accent_grey)
         } else {
             val scriptText = getScriptText()
             val name = getFileName()
             binding.outputPanel.tvOutputText.text = ""
             onShowOutputPanel()
             isRunning = true
+            hadError = false
+            runStartNanos = System.nanoTime()
             onRunStateChanged(true)
             setStdinActive(false)
             appendHeaderLine("$ python $name\n")
@@ -85,19 +90,36 @@ class ExecutionUiController(
         }
     }
 
-    /** Extracted so both a fresh Run and a reconnect-after-relaunch use
-     * identical callback wiring, rather than duplicating it. */
     private fun buildListener(): ExecutionController.Listener = object : ExecutionController.Listener {
         override fun onStdout(text: String) = activity.runOnUiThread { appendOutput(text) }
         override fun onStderr(text: String) = activity.runOnUiThread { appendOutput(text) }
         override fun onInputRequested() = activity.runOnUiThread { setStdinActive(true) }
         override fun onExited() = activity.runOnUiThread {
-            isRunning = false
-            onRunStateChanged(false)
-            setStdinActive(false)
+            // Ignore a late exit signal if Stop already ended this run.
+            if (isRunning) {
+                isRunning = false
+                onRunStateChanged(false)
+                setStdinActive(false)
+                appendFinishLine()
+            }
         }
         override fun onError(line: Int, errorType: String, message: String) = activity.runOnUiThread {
+            hadError = true
             appendErrorSummary(line, errorType, message)
+        }
+    }
+
+    /** Item 8: closing line with the actual measured time. */
+    private fun appendFinishLine() {
+        val timePart = if (runStartNanos > 0L) {
+            val seconds = (System.nanoTime() - runStartNanos) / 1_000_000_000.0
+            " in " + String.format(Locale.US, "%.2f", seconds) + " s"
+        } else ""
+
+        if (hadError) {
+            appendStatusLine("\u2717 Execution failed$timePart", R.color.error_color)
+        } else {
+            appendStatusLine("\u2713 Finished successfully$timePart", R.color.success_color)
         }
     }
 
@@ -136,6 +158,10 @@ class ExecutionUiController(
     private fun appendOutput(text: String) {
         binding.outputPanel.tvOutputText.append(text)
         trimOutputIfNeeded()
+        scrollOutputToEnd()
+    }
+
+    private fun scrollOutputToEnd() {
         binding.outputPanel.outputScroll.post {
             binding.outputPanel.outputScroll.fullScroll(View.FOCUS_DOWN)
         }
@@ -150,18 +176,34 @@ class ExecutionUiController(
         binding.outputPanel.tvOutputText.text = current.subSequence(safeCut, current.length)
     }
 
+    /** Item 7: the italic "$ python <file>" line is grey now. */
     private fun appendHeaderLine(text: String) {
         val spannable = SpannableString(text)
         spannable.setSpan(StyleSpan(Typeface.ITALIC), 0, text.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
         spannable.setSpan(
-            ForegroundColorSpan(activity.getColor(R.color.mint_primary)),
+            ForegroundColorSpan(activity.getColor(R.color.accent_grey)),
             0, text.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
         )
         binding.outputPanel.tvOutputText.append(spannable)
         trimOutputIfNeeded()
-        binding.outputPanel.outputScroll.post {
-            binding.outputPanel.outputScroll.fullScroll(View.FOCUS_DOWN)
-        }
+        scrollOutputToEnd()
+    }
+
+    /** Appends a coloured status line on its own line at the end of the
+     * output (adds a line break first if the program's last output
+     * didn't end with one). */
+    private fun appendStatusLine(text: String, colorRes: Int) {
+        val current = binding.outputPanel.tvOutputText.text
+        val prefix = if (current.isNotEmpty() && current.last() != '\n') "\n" else ""
+        val full = "$prefix$text\n"
+        val span = SpannableString(full)
+        span.setSpan(
+            ForegroundColorSpan(activity.getColor(colorRes)),
+            0, full.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+        )
+        binding.outputPanel.tvOutputText.append(span)
+        trimOutputIfNeeded()
+        scrollOutputToEnd()
     }
 
     private fun appendErrorSummary(line: Int, errorType: String, message: String) {
@@ -173,9 +215,7 @@ class ExecutionUiController(
         )
         binding.outputPanel.tvOutputText.append(summarySpan)
         trimOutputIfNeeded()
-        binding.outputPanel.outputScroll.post {
-            binding.outputPanel.outputScroll.fullScroll(View.FOCUS_DOWN)
-        }
+        scrollOutputToEnd()
 
         if (line > 0) {
             onJumpToError(line)

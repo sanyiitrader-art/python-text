@@ -22,7 +22,10 @@ class FileTreeAdapter(
     private val onFileClick: (WorkspaceManager.FileNode.Leaf) -> Unit,
     private val onFileLongPress: (leaf: WorkspaceManager.FileNode.Leaf, depth: Int, anchor: View) -> Unit,
     private val onNameConfirmed: (existing: WorkspaceManager.FileNode.Leaf?, newName: String) -> Unit,
-    private val isNameTaken: (candidateName: String, target: EditTarget) -> Boolean
+    private val isNameTaken: (candidateName: String, target: EditTarget) -> Boolean,
+    // Item 6: lets the drawer swap "+"/folder name for Cancel/Save
+    // while a create/rename row is active.
+    private val onEditingStateChanged: (editing: Boolean) -> Unit = {}
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     sealed class EditTarget {
@@ -49,6 +52,8 @@ class FileTreeAdapter(
         private const val TYPE_EDIT = 2
     }
 
+    fun isEditing(): Boolean = currentEditTarget != null
+
     fun submitTree(nodes: List<WorkspaceManager.FileNode>) {
         rootNodes = nodes
         recomputeRows()
@@ -56,20 +61,24 @@ class FileTreeAdapter(
 
     fun startCreatingNewFile(defaultName: String) {
         currentEditTarget = EditTarget.NewFile(depth = 0, defaultName = defaultName)
+        onEditingStateChanged(true)
         recomputeRows()
     }
 
     fun startRenaming(leaf: WorkspaceManager.FileNode.Leaf, depth: Int) {
         currentEditTarget = EditTarget.Rename(leaf, depth)
+        onEditingStateChanged(true)
         recomputeRows()
     }
 
     fun cancelEditing() {
         currentEditTarget = null
         activeEditText = null
+        onEditingStateChanged(false)
         recomputeRows()
     }
 
+    /** Used by the drawer's Save button. Shakes + vibrates if invalid. */
     fun confirmCurrentEditIfValid(): Boolean {
         val editText = activeEditText ?: return false
         val target = currentEditTarget ?: return false
@@ -227,14 +236,6 @@ class FileTreeAdapter(
             }
         }
 
-        // FIX item 4: requestFocus() moved INSIDE the same posted block as
-        // showSoftInput, rather than called immediately during bind. When
-        // called immediately, the row's view may not yet be fully
-        // attached/laid out in the window (RecyclerView just created or
-        // recycled it this same frame), so the focus request could
-        // silently fail — and a showSoftInput on a view that never
-        // actually gained focus does nothing. Deferring both to the next
-        // frame, after layout has settled, is what makes this reliable.
         editText.post {
             editText.requestFocus()
             val imm = editText.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager

@@ -5,12 +5,17 @@
     android:orientation="vertical">
 
     <LinearLayout
+        android:id="@+id/recent_row"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginStart="4dp"
+        android:layout_marginEnd="4dp"
+        android:layout_marginTop="2dp"
+        android:layout_marginBottom="2dp"
         android:orientation="horizontal"
         android:background="?attr/selectableItemBackground"
         android:gravity="center_vertical"
-        android:paddingStart="16dp">
+        android:paddingStart="12dp">
 
         <ImageView
             android:layout_width="20dp"

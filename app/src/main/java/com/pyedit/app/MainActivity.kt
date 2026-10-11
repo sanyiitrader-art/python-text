@@ -113,9 +113,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
-        // Phase 3 item 1: fires immediately on pause, not on the
-        // debounced autosave timer — a process kill while backgrounded
-        // has no guarantee that timer ever gets to run.
         fileController.persistCurrentCursorPosition()
     }
 
@@ -132,30 +129,42 @@ class MainActivity : AppCompatActivity() {
         binding.drawerContent.root.layoutParams = params
     }
 
+    private fun hideKeyboardNow() {
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        val token = currentFocus?.windowToken ?: binding.root.windowToken
+        imm.hideSoftInputFromWindow(token, 0)
+    }
+
     private fun setupOutsideTapDismiss() {
         binding.mainContentRoot.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
-                val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-                imm.hideSoftInputFromWindow(binding.mainContentRoot.windowToken, 0)
+                hideKeyboardNow()
             }
             false
         }
     }
 
+    /**
+     * FIX item 2: the keyboard used to be hidden only in onDrawerOpened,
+     * which fires after the whole open animation (~0.9s). Now it's also
+     * hidden the instant the hamburger is tapped (see setupTopBar) and
+     * the moment a manual drawer drag begins; onDrawerOpened stays as a
+     * final safety net.
+     */
     private fun setupDrawerKeyboardDismiss() {
         binding.drawerLayout.addDrawerListener(object : DrawerLayout.DrawerListener {
             override fun onDrawerSlide(drawerView: View, slideOffset: Float) {}
-            override fun onDrawerOpened(drawerView: View) {
-                val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-                imm.hideSoftInputFromWindow(drawerView.windowToken, 0)
-            }
+            override fun onDrawerOpened(drawerView: View) { hideKeyboardNow() }
             override fun onDrawerClosed(drawerView: View) {}
-            override fun onDrawerStateChanged(newState: Int) {}
+            override fun onDrawerStateChanged(newState: Int) {
+                if (newState == DrawerLayout.STATE_DRAGGING) hideKeyboardNow()
+            }
         })
     }
 
     private fun setupTopBar() {
         binding.btnHamburger.setOnClickListener {
+            hideKeyboardNow()
             binding.drawerLayout.openDrawer(Gravity.START)
         }
         binding.btnMenu.setOnClickListener { anchor -> showThreeDotMenu(anchor) }

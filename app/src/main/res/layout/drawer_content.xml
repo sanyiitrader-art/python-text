@@ -41,11 +41,13 @@
 
     </LinearLayout>
 
+    <!-- Item 5: no maxHeight (it doesn't apply to RecyclerView anyway).
+         FileController caps this to 4 rows in code and lets it scroll
+         inside that space. -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/rv_recent_files"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:maxHeight="200dp"
         android:paddingStart="8dp"
         android:paddingEnd="8dp" />
 
@@ -116,16 +118,19 @@
         android:layout_height="0dp"
         android:layout_weight="1">
 
+        <!-- Item 4: clipToPadding=false; FileController sets bottom
+             padding = footer height so the last rows can scroll up
+             clear of the footer instead of getting stuck under it. -->
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/rv_file_tree"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
+            android:clipToPadding="false"
             android:paddingStart="8dp"
             android:paddingEnd="8dp" />
 
-        <!-- Item 3: surface and its buttons both enlarged ~20-25%,
-             proportionally, same ratio/vibe as before — just bigger. -->
         <LinearLayout
+            android:id="@+id/drawer_footer"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_gravity="bottom"

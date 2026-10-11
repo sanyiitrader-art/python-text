@@ -48,10 +48,14 @@ class EditorController(
 
         attachContentBehaviors()
 
+        // FIX item 3: this listener used to call hideKeyboard() on every
+        // ACTION_DOWN, so tapping the typing area while the keyboard was
+        // already up closed it. Tapping the editor must never dismiss
+        // the keyboard — outside-tap dismissal is handled by
+        // MainActivity for areas that are NOT the editor.
         editor.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
                 clearErrorHighlightIfActive()
-                hideKeyboard()
             }
             false
         }
@@ -61,11 +65,6 @@ class EditorController(
         applyVisualPolish()
         setupPythonToolbar()
         setupKeyboardAwareToolbar()
-    }
-
-    private fun hideKeyboard() {
-        val imm = activity.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-        imm.hideSoftInputFromWindow(editor.windowToken, 0)
     }
 
     fun requestFocusAndShowKeyboard() {
@@ -136,11 +135,6 @@ class EditorController(
         } catch (t: Throwable) { /* best-effort */ }
     }
 
-    /**
-     * New for Phase 3 item 1. Returns the CURRENT cursor position, for
-     * FileController to persist. Zero-based, matching what setSelection
-     * already expects elsewhere in this file.
-     */
     fun getCursorPosition(): Pair<Int, Int> {
         return try {
             Pair(editor.cursor.leftLine, editor.cursor.leftColumn)
@@ -149,14 +143,6 @@ class EditorController(
         }
     }
 
-    /**
-     * Restores a previously-saved cursor position, safely. Explicitly
-     * clamped against the CURRENT line count/line length rather than
-     * trusting the saved value outright — this is what makes it safe if
-     * the file's content changed externally between sessions (spec §65's
-     * own requirement: "restoring... must be safe when the file has
-     * changed externally").
-     */
     fun restoreCursorPosition(line: Int, column: Int) {
         try {
             val lineCount = editor.text.lineCount
@@ -165,7 +151,7 @@ class EditorController(
             val lineLength = editor.text.getLineString(safeLine).length
             val safeColumn = column.coerceIn(0, lineLength)
             editor.setSelection(safeLine, safeColumn)
-        } catch (t: Throwable) { /* best-effort; never worth crashing over */ }
+        } catch (t: Throwable) { /* best-effort */ }
     }
 
     private fun highlightErrorLine(zeroBasedLine: Int) {

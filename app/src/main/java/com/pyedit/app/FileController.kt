@@ -52,6 +52,8 @@ class FileController(
     private var autosaveRunnable: Runnable? = null
     private val autosaveDelayMs = 1200L
 
+    private val maxVisibleRecentRows = 4
+
     fun setup() {
         editorController.onContentChanged { markDirty() }
         setupDrawerLists()
@@ -142,6 +144,13 @@ class FileController(
         val name = currentFileDoc?.name ?: activity.getString(R.string.untitled_file)
         val display = if (isDirty) "$name *" else name
         onStateChanged(hasFileOpen, isDirty, display)
+
+        // Item 6: keep the drawer's Recent list pinned/highlighted to
+        // whatever is open right now (no-op if unchanged).
+        if (::recentFilesAdapter.isInitialized) {
+            recentFilesAdapter.setCurrentUri(currentFileDoc?.uri?.toString())
+            updateRecentListHeight()
+        }
     }
 
     fun getDisplayFileName(): String = currentFileDoc?.name ?: "untitled.py"
@@ -387,8 +396,19 @@ class FileController(
             onNameConfirmed = { existing, newName -> handleNameConfirmed(existing, newName) },
             isNameTaken = { candidateName, target -> isNameTaken(candidateName, target) }
         )
-        binding.drawerContent.rvFileTree.layoutManager = LinearLayoutManager(activity)
-        binding.drawerContent.rvFileTree.adapter = fileTreeAdapter
+        val treeRv = binding.drawerContent.rvFileTree
+        treeRv.layoutManager = LinearLayoutManager(activity)
+        treeRv.adapter = fileTreeAdapter
+
+        // Item 4: pad the file list's bottom by the footer's height
+        // (kept in sync if it ever changes) so the last rows can be
+        // scrolled up above the overlaid footer.
+        treeRv.clipToPadding = false
+        binding.drawerContent.drawerFooter.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
+            if (treeRv.paddingBottom != v.height) {
+                treeRv.setPadding(treeRv.paddingLeft, treeRv.paddingTop, treeRv.paddingRight, v.height)
+            }
+        }
 
         recentFilesAdapter = RecentFilesAdapter { uriString ->
             DocumentFile.fromSingleUri(activity, Uri.parse(uriString))?.let { openFile(it) }
@@ -397,15 +417,37 @@ class FileController(
         binding.drawerContent.rvRecentFiles.adapter = recentFilesAdapter
 
         activity.lifecycleScope.launch {
-            recentStore.recentFiles.collect { list -> recentFilesAdapter.submitList(list) }
+            recentStore.recentFiles.collect { list ->
+                recentFilesAdapter.submitList(list)
+                updateRecentListHeight()
+            }
         }
 
-        // FIX for item 4: passes the currently-open file's URI through,
-        // so Clear keeps that one entry instead of wiping everything.
         binding.drawerContent.tvClearRecent.setOnClickListener {
             activity.lifecycleScope.launch {
                 recentStore.clearRecent(currentFileDoc?.uri?.toString())
             }
+        }
+    }
+
+    /**
+     * Item 5: up to 4 rows the Recent list simply wraps its content;
+     * beyond that it's fixed at exactly 4 rows tall and scrolls inside
+     * that space, so it can no longer push the Root Folder section down
+     * the drawer.
+     */
+    private fun updateRecentListHeight() {
+        val rv = binding.drawerContent.rvRecentFiles
+        rv.post {
+            val lp = rv.layoutParams
+            if (recentFilesAdapter.itemCount <= maxVisibleRecentRows) {
+                lp.height = ViewGroup.LayoutParams.WRAP_CONTENT
+            } else {
+                val rowHeight = rv.getChildAt(0)?.height?.takeIf { it > 0 }
+                    ?: (44 * activity.resources.displayMetrics.density).toInt()
+                lp.height = rowHeight * maxVisibleRecentRows
+            }
+            rv.layoutParams = lp
         }
     }
 

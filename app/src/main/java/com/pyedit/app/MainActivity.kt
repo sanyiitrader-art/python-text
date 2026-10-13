@@ -53,6 +53,9 @@ class MainActivity : AppCompatActivity() {
         recentStore = RecentFilesStore(this)
         executionController = ExecutionController(this)
 
+        // Reconciles the saved TypeScript install with the real files.
+        RuntimeInstaller.init(applicationContext)
+
         sizeDrawerToScreenWidth()
 
         editorController = EditorController(this, binding, editorSettings, ::showCrashDiagnostic)
@@ -90,6 +93,7 @@ class MainActivity : AppCompatActivity() {
             executionController = executionController,
             getScriptText = { editorController.getText() },
             getFileName = { fileController.getDisplayFileName() },
+            getCurrentDoc = { fileController.currentFileDoc },
             onJumpToError = { line ->
                 fileController.showEditorState()
                 editorController.jumpToLine(line)
@@ -106,7 +110,7 @@ class MainActivity : AppCompatActivity() {
         setupTopBar()
         setupOutsideTapDismiss()
         setupDrawerKeyboardDismiss()
-        setupDownloadLibraryEntry()
+        setupFooterEntries()
         updateActionAvailability(fileController.hasFileOpen)
 
         lifecycleScope.launch {
@@ -133,12 +137,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Enables ONLY the "Download library" row of the drawer footer (child 1;
-     * child 0 is the divider). "Install other languages" and "Settings"
-     * stay disabled exactly as before.
+     * Footer children: 0 = divider, 1 = Download library, 2 = Install other
+     * languages, 3 = Settings (still disabled).
      */
-    private fun setupDownloadLibraryEntry() {
-        val row = binding.drawerContent.drawerFooter.getChildAt(1) ?: return
+    private fun setupFooterEntries() {
+        enableFooterRow(1, DownloadLibraryActivity::class.java)
+        enableFooterRow(2, InstallLanguagesActivity::class.java)
+    }
+
+    private fun enableFooterRow(index: Int, target: Class<*>) {
+        val row = binding.drawerContent.drawerFooter.getChildAt(index) ?: return
         row.alpha = 1f
         row.isEnabled = true
         row.isClickable = true
@@ -147,9 +155,7 @@ class MainActivity : AppCompatActivity() {
         if (theme.resolveAttribute(android.R.attr.selectableItemBackground, tv, true)) {
             row.setBackgroundResource(tv.resourceId)
         }
-        row.setOnClickListener {
-            startActivity(Intent(this, DownloadLibraryActivity::class.java))
-        }
+        row.setOnClickListener { startActivity(Intent(this, target)) }
     }
 
     private fun hideKeyboardNow() {

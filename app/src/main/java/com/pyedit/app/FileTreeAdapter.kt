@@ -23,8 +23,6 @@ class FileTreeAdapter(
     private val onFileLongPress: (leaf: WorkspaceManager.FileNode.Leaf, depth: Int, anchor: View) -> Unit,
     private val onNameConfirmed: (existing: WorkspaceManager.FileNode.Leaf?, newName: String) -> Unit,
     private val isNameTaken: (candidateName: String, target: EditTarget) -> Boolean,
-    // Item 6: lets the drawer swap "+"/folder name for Cancel/Save
-    // while a create/rename row is active.
     private val onEditingStateChanged: (editing: Boolean) -> Unit = {}
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
@@ -78,7 +76,6 @@ class FileTreeAdapter(
         recomputeRows()
     }
 
-    /** Used by the drawer's Save button. Shakes + vibrates if invalid. */
     fun confirmCurrentEditIfValid(): Boolean {
         val editText = activeEditText ?: return false
         val target = currentEditTarget ?: return false
@@ -178,13 +175,15 @@ class FileTreeAdapter(
         }
     }
 
+    /** Any supported extension is valid now (was: only .py). */
     private fun validationReason(name: String, target: EditTarget): String? {
         if (name.isEmpty()) return "Type a file name"
 
-        val nameBeforeExtension = if (name.endsWith(".py")) name.removeSuffix(".py") else name
-        if (nameBeforeExtension.isEmpty()) return "Type a name before .py"
-
-        if (!name.endsWith(".py")) return "Only .py files are supported"
+        val dot = name.lastIndexOf('.')
+        if (dot == -1 || !Languages.isDiscoverable(name)) {
+            return "Unsupported type (use .py .js .ts .lua .html .css)"
+        }
+        if (name.substring(0, dot).isEmpty()) return "Type a name before ${name.substring(dot)}"
 
         if (isNameTaken(name, target)) return "A file with this name already exists"
         return null
@@ -203,7 +202,7 @@ class FileTreeAdapter(
             is EditTarget.Rename -> target.leaf.name
         }
         editText.setText(initialName)
-        val selectEnd = initialName.lastIndexOf(".py").let { if (it == -1) initialName.length else it }
+        val selectEnd = initialName.lastIndexOf('.').let { if (it <= 0) initialName.length else it }
         editText.setSelection(0, selectEnd)
         applyValidationUi(editText, errorLabel, validationReason(initialName, target))
 

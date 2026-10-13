@@ -53,12 +53,6 @@ android {
 
 chaquopy {
     defaultConfig {
-        // REVERTED from 3.13: that build only ships native libs for
-        // arm64-v8a/x86_64, dropping armeabi-v7a/x86 — which conflicts
-        // with spec §10's requirement to support all four ABI families.
-        // 3.11 already includes match/case, the walrus operator, and
-        // structural pattern matching, so this only misses syntax
-        // introduced specifically in 3.12+.
         version = "3.11"
     }
 }
@@ -75,6 +69,11 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("androidx.documentfile:documentfile:1.0.1")
+
+    // New: JavaScript/TypeScript execution (QuickJS, native, all four ABIs)
+    implementation("app.cash.quickjs:quickjs-android:0.9.2")
+    // New: Lua execution (pure-Java Lua 5.2 dialect)
+    implementation("org.luaj:luaj-jse:3.0.1")
 
     implementation(platform("io.github.rosemoe:editor-bom:0.24.3"))
     implementation("io.github.rosemoe:editor")

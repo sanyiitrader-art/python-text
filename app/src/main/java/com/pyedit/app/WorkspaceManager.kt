@@ -28,11 +28,8 @@ class WorkspaceManager(private val context: Context) {
         return buildTreeFrom(root)
     }
 
-    /**
-     * FIX for item 4: subfolders with no .py file anywhere inside them
-     * (recursively) are now omitted entirely, not just their non-.py
-     * file contents.
-     */
+    /** Lists folders that contain at least one supported file, plus the
+     * supported files themselves (the one centralized filter: Languages). */
     private fun buildTreeFrom(dir: DocumentFile): List<FileNode> {
         val children = dir.listFiles()
         return children
@@ -44,7 +41,7 @@ class WorkspaceManager(private val context: Context) {
                     } else {
                         null
                     }
-                } else if (child.name?.endsWith(".py") == true) {
+                } else if (Languages.isDiscoverable(child.name ?: "")) {
                     FileNode.Leaf(child, child.name ?: "")
                 } else {
                     null
@@ -56,6 +53,7 @@ class WorkspaceManager(private val context: Context) {
             )
     }
 
+    /** True if the tree contains any supported file (name kept for callers). */
     fun hasAnyPythonFile(nodes: List<FileNode>): Boolean = nodes.any { node ->
         when (node) {
             is FileNode.Leaf -> true
@@ -79,14 +77,19 @@ class WorkspaceManager(private val context: Context) {
         }
     }
 
+    private fun withSupportedExtension(name: String) =
+        if (Languages.isDiscoverable(name)) name else "$name.py"
+
     fun createNewFileInTree(rootUri: Uri, name: String): DocumentFile? {
         val root = DocumentFile.fromTreeUri(context, rootUri) ?: return null
-        val fileName = if (name.endsWith(".py")) name else "$name.py"
-        return root.findFile(fileName) ?: root.createFile("text/x-python", fileName)
+        val fileName = withSupportedExtension(name)
+        // A generic MIME type stops providers from appending their own extension.
+        val mime = if (fileName.endsWith(".py")) "text/x-python" else "application/octet-stream"
+        return root.findFile(fileName) ?: root.createFile(mime, fileName)
     }
 
     fun renameFile(doc: DocumentFile, newName: String): Boolean {
-        val fileName = if (newName.endsWith(".py")) newName else "$newName.py"
+        val fileName = withSupportedExtension(newName)
         return try {
             doc.renameTo(fileName)
         } catch (t: Throwable) {

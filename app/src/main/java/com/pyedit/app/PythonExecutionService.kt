@@ -12,8 +12,11 @@ import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import java.io.File
 import java.util.concurrent.LinkedBlockingQueue
-import kotlin.concurrent.thread
 
+/**
+ * Runs every language in the isolated :pyexec process, so Stop (killing the
+ * process) works the same way for all of them.
+ */
 class PythonExecutionService : Service() {
 
     private var clientMessenger: Messenger? = null
@@ -57,7 +60,10 @@ class PythonExecutionService : Service() {
             ExecutionProtocol.MSG_RUN -> {
                 clientMessenger = msg.replyTo
                 val path = msg.data.getString(ExecutionProtocol.KEY_SCRIPT_PATH)
-                if (path != null) runScript(path)
+                val lang = msg.data.getString(ExecutionProtocol.KEY_LANGUAGE) ?: "python"
+                val compiler = msg.data.getString(ExecutionProtocol.KEY_COMPILER_PATH)
+                val display = msg.data.getString(ExecutionProtocol.KEY_FILE_NAME) ?: "script"
+                if (path != null) runScript(path, lang, compiler, display)
             }
             ExecutionProtocol.MSG_STDIN_LINE -> {
                 val line = msg.data.getString(ExecutionProtocol.KEY_TEXT) ?: ""
@@ -73,8 +79,6 @@ class PythonExecutionService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        // Tells pyedit_runner where Download Library installs packages.
-        // Must be set before Python starts so os.environ sees it.
         try {
             Os.setenv("PYEDIT_SITE_PACKAGES", File(filesDir, "site-packages").absolutePath, true)
         } catch (t: Throwable) { /* packages just won't be importable */ }
@@ -84,26 +88,63 @@ class PythonExecutionService : Service() {
         }
     }
 
-    private fun runScript(path: String) {
+    private fun runScript(path: String, lang: String, compilerPath: String?, displayName: String) {
         isExecuting = true
-        thread(name = "pyedit-exec") {
+        // Big stack: loading the TypeScript compiler into QuickJS is deep.
+        Thread(null, {
             try {
-                val py = Python.getInstance()
-                val runner = py.getModule("pyedit_runner")
-                runner.callAttr(
-                    "run_script",
-                    path,
-                    StreamEmitter(ExecutionProtocol.MSG_STDOUT),
-                    StreamEmitter(ExecutionProtocol.MSG_STDERR),
-                    StdinReader(),
-                    ErrorReporter()
-                )
+                if (lang == "python") runPython(path) else runOther(path, lang, compilerPath, displayName)
             } catch (t: Throwable) {
                 sendToClient(ExecutionProtocol.MSG_STDERR, "Execution error: ${t.message}\n")
             } finally {
                 isExecuting = false
                 sendToClient(ExecutionProtocol.MSG_EXITED, "")
             }
+        }, "pyedit-exec", 32L * 1024 * 1024).start()
+    }
+
+    private fun runPython(path: String) {
+        val py = Python.getInstance()
+        val runner = py.getModule("pyedit_runner")
+        runner.callAttr(
+            "run_script",
+            path,
+            StreamEmitter(ExecutionProtocol.MSG_STDOUT),
+            StreamEmitter(ExecutionProtocol.MSG_STDERR),
+            StdinReader(),
+            ErrorReporter()
+        )
+    }
+
+    private fun runOther(path: String, lang: String, compilerPath: String?, displayName: String) {
+        val source = File(path).readText()
+        val out = { s: String -> sendToClient(ExecutionProtocol.MSG_STDOUT, s) }
+        val err = { s: String -> sendToClient(ExecutionProtocol.MSG_STDERR, s) }
+        val stdin = StdinReader()
+        val reporter = ErrorReporter()
+        val readLine = { stdin.readLine() }
+        val report = { line: Int, type: String, message: String -> reporter.report(line, type, message) }
+
+        when (lang) {
+            "lua" -> LuaRunner.run(source, displayName, out, err, readLine, report)
+            "js" -> JsRunner.run(source, displayName, true, out, err, readLine, report)
+            "ts" -> {
+                val compiler = compilerPath?.let { File(it) }
+                if (compiler == null || !compiler.exists()) {
+                    report(0, "RuntimeError", "The TypeScript compiler is missing. Reinstall it from Install other languages.")
+                    return
+                }
+                val result = TsTranspiler.transpile(compiler, source, displayName)
+                val js = result.js
+                if (js == null) {
+                    val first = result.errors.first()
+                    report(first.first, "SyntaxError", first.second)
+                    return
+                }
+                val jsName = displayName.replace(Regex("\\.(ts|mts|cts)$", RegexOption.IGNORE_CASE), ".js")
+                JsRunner.run(js, jsName, false, out, err, readLine, report)
+            }
+            else -> report(0, "RuntimeError", "No runtime for '$lang'")
         }
     }
 

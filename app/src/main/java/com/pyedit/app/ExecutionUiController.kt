@@ -1,6 +1,7 @@
 package com.pyedit.app
 
 import android.content.Context
+import android.content.Intent
 import android.graphics.Typeface
 import android.text.Spannable
 import android.text.SpannableString
@@ -10,7 +11,10 @@ import android.text.style.StyleSpan
 import android.view.KeyEvent
 import android.view.View
 import android.view.inputmethod.InputMethodManager
+import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.documentfile.provider.DocumentFile
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import com.pyedit.app.databinding.ActivityMainBinding
@@ -22,6 +26,7 @@ class ExecutionUiController(
     private val executionController: ExecutionController,
     private val getScriptText: () -> String,
     private val getFileName: () -> String,
+    private val getCurrentDoc: () -> DocumentFile?,
     private val onJumpToError: (Int) -> Unit,
     private val onRunStateChanged: (isRunning: Boolean) -> Unit,
     private val isKeyboardVisible: () -> Boolean,
@@ -34,7 +39,6 @@ class ExecutionUiController(
     private val maxOutputChars = 200_000
     private val trimToChars = 150_000
 
-    // Item 8: real elapsed time + whether the script raised an error.
     private var runStartNanos = 0L
     private var hadError = false
 
@@ -57,7 +61,7 @@ class ExecutionUiController(
             activity.runOnUiThread {
                 if (running) {
                     isRunning = true
-                    runStartNanos = 0L // real start time is unknown after a relaunch
+                    runStartNanos = 0L
                     hadError = false
                     onRunStateChanged(true)
                     onShowOutputPanel()
@@ -67,6 +71,7 @@ class ExecutionUiController(
         }
     }
 
+    /** Picks the executor from the file extension (see Languages). */
     fun onRunStopClicked() {
         if (isRunning) {
             executionController.stop()
@@ -74,20 +79,85 @@ class ExecutionUiController(
             onRunStateChanged(false)
             setStdinActive(false)
             appendStatusLine("\u25A0 you stopped execution", R.color.accent_grey)
-        } else {
-            val scriptText = getScriptText()
-            val name = getFileName()
-            binding.outputPanel.tvOutputText.text = ""
-            onShowOutputPanel()
-            isRunning = true
-            hadError = false
-            runStartNanos = System.nanoTime()
-            onRunStateChanged(true)
-            setStdinActive(false)
-            appendHeaderLine("$ python $name\n")
-
-            executionController.run(scriptText, name, buildListener())
+            return
         }
+
+        val name = getFileName()
+        when (Languages.forFileName(name)) {
+            Lang.PYTHON -> startRun(name, "python", null, "$ python $name")
+            Lang.LUA -> startRun(name, "lua", null, "$ lua $name")
+            Lang.JAVASCRIPT -> startRun(name, "js", null, "$ quickjs $name")
+            Lang.TYPESCRIPT -> {
+                if (RuntimeInstaller.isTypeScriptUsable(activity)) {
+                    startRun(
+                        name, "ts", RuntimeInstaller.compilerFile(activity).absolutePath,
+                        "$ tsc (transpile) \u2192 quickjs $name"
+                    )
+                } else {
+                    showMissingRuntime(
+                        "TypeScript compiler not installed",
+                        "Running .ts files needs the TypeScript compiler. Your file and its contents are untouched."
+                    )
+                }
+            }
+            Lang.WEB -> launchWebPreview(name)
+            Lang.CSS -> Toast.makeText(
+                activity,
+                "A .css file is a stylesheet, not a program. Open the HTML file that uses it and press Run.",
+                Toast.LENGTH_LONG
+            ).show()
+            Lang.RUBY -> showMissingRuntime(
+                "Ruby isn't available",
+                "No Ruby runtime that can run on Android from app storage is available, so .rb files can't be run."
+            )
+            Lang.PHP -> showMissingRuntime(
+                "PHP isn't available",
+                "No PHP runtime that can run on Android from app storage is available, so .php files can't be run."
+            )
+            null -> Toast.makeText(
+                activity,
+                "This file type can't be run or previewed.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    private fun startRun(name: String, language: String, compilerPath: String?, header: String) {
+        binding.outputPanel.tvOutputText.text = ""
+        onShowOutputPanel()
+        isRunning = true
+        hadError = false
+        runStartNanos = System.nanoTime()
+        onRunStateChanged(true)
+        setStdinActive(false)
+        appendHeaderLine("$header\n")
+        executionController.run(getScriptText(), name, language, compilerPath, buildListener())
+    }
+
+    private fun launchWebPreview(name: String) {
+        val dir = getCurrentDoc()?.parentFile
+        WebPreviewHolder.html = getScriptText()
+        WebPreviewHolder.title = name
+        WebPreviewHolder.dirUri = dir?.uri
+        if (dir == null) {
+            Toast.makeText(
+                activity,
+                "Opened without its folder - linked CSS/JS/image files can't load. Open the folder first.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+        activity.startActivity(Intent(activity, WebPreviewActivity::class.java))
+    }
+
+    private fun showMissingRuntime(title: String, message: String) {
+        AlertDialog.Builder(activity)
+            .setTitle(title)
+            .setMessage(message)
+            .setPositiveButton("Install other languages") { _, _ ->
+                activity.startActivity(Intent(activity, InstallLanguagesActivity::class.java))
+            }
+            .setNegativeButton("Close", null)
+            .show()
     }
 
     private fun buildListener(): ExecutionController.Listener = object : ExecutionController.Listener {
@@ -95,7 +165,6 @@ class ExecutionUiController(
         override fun onStderr(text: String) = activity.runOnUiThread { appendOutput(text) }
         override fun onInputRequested() = activity.runOnUiThread { setStdinActive(true) }
         override fun onExited() = activity.runOnUiThread {
-            // Ignore a late exit signal if Stop already ended this run.
             if (isRunning) {
                 isRunning = false
                 onRunStateChanged(false)
@@ -109,7 +178,6 @@ class ExecutionUiController(
         }
     }
 
-    /** Item 8: closing line with the actual measured time. */
     private fun appendFinishLine() {
         val timePart = if (runStartNanos > 0L) {
             val seconds = (System.nanoTime() - runStartNanos) / 1_000_000_000.0
@@ -123,9 +191,14 @@ class ExecutionUiController(
         }
     }
 
+    /** Compile check is Python-only (it uses compile()). */
     fun runCompileCheck() {
-        val scriptText = getScriptText()
         val name = getFileName()
+        if (Languages.forFileName(name) != Lang.PYTHON) {
+            Toast.makeText(activity, "Compile check is only available for Python files.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val scriptText = getScriptText()
 
         try {
             if (!Python.isStarted()) {
@@ -176,7 +249,6 @@ class ExecutionUiController(
         binding.outputPanel.tvOutputText.text = current.subSequence(safeCut, current.length)
     }
 
-    /** Item 7: the italic "$ python <file>" line is grey now. */
     private fun appendHeaderLine(text: String) {
         val spannable = SpannableString(text)
         spannable.setSpan(StyleSpan(Typeface.ITALIC), 0, text.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
@@ -189,9 +261,6 @@ class ExecutionUiController(
         scrollOutputToEnd()
     }
 
-    /** Appends a coloured status line on its own line at the end of the
-     * output (adds a line break first if the program's last output
-     * didn't end with one). */
     private fun appendStatusLine(text: String, colorRes: Int) {
         val current = binding.outputPanel.tvOutputText.text
         val prefix = if (current.isNotEmpty() && current.last() != '\n') "\n" else ""

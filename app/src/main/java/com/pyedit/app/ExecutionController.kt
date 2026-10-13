@@ -21,11 +21,20 @@ class ExecutionController(private val context: Context) {
         fun onError(line: Int, errorType: String, message: String)
     }
 
+    private data class PendingRun(
+        val path: String,
+        val language: String,
+        val compilerPath: String?,
+        val displayName: String
+    )
+
     private var serviceMessenger: Messenger? = null
     private var listener: Listener? = null
     private var bound = false
     private var pendingReconnect = false
     private var pendingStatusCallback: ((Boolean) -> Unit)? = null
+    private var pendingRun: PendingRun? = null
+    private var lastTempFile: File? = null
 
     private val clientMessenger = Messenger(android.os.Handler(android.os.Looper.getMainLooper()) { msg ->
         when (msg.what) {
@@ -33,8 +42,10 @@ class ExecutionController(private val context: Context) {
                 listener?.onStdout(msg.data.getString(ExecutionProtocol.KEY_TEXT) ?: "")
             ExecutionProtocol.MSG_STDERR ->
                 listener?.onStderr(msg.data.getString(ExecutionProtocol.KEY_TEXT) ?: "")
-            ExecutionProtocol.MSG_EXITED ->
+            ExecutionProtocol.MSG_EXITED -> {
+                deleteTemp()
                 listener?.onExited()
+            }
             ExecutionProtocol.MSG_INPUT_REQUESTED ->
                 listener?.onInputRequested()
             ExecutionProtocol.MSG_ERROR -> {
@@ -56,8 +67,8 @@ class ExecutionController(private val context: Context) {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
             serviceMessenger = Messenger(binder)
             bound = true
-            pendingScriptPath?.let { runInternal(it) }
-            pendingScriptPath = null
+            pendingRun?.let { runInternal(it) }
+            pendingRun = null
             if (pendingReconnect) {
                 pendingReconnect = false
                 sendRegister()
@@ -70,35 +81,40 @@ class ExecutionController(private val context: Context) {
         }
     }
 
-    private var pendingScriptPath: String? = null
-
-    fun run(scriptText: String, scriptDisplayName: String, listener: Listener) {
+    /**
+     * The temp copy keeps the original extension (the user's file is never
+     * touched) and is deleted when the run ends or is stopped.
+     */
+    fun run(
+        scriptText: String,
+        scriptDisplayName: String,
+        language: String,
+        compilerPath: String?,
+        listener: Listener
+    ) {
         this.listener = listener
-        val tempFile = File(context.cacheDir, "run_${scriptDisplayName.substringBeforeLast('.')}.py")
+        deleteTemp()
+        val ext = Languages.extensionOf(scriptDisplayName).ifEmpty { "txt" }
+        val base = scriptDisplayName.substringBeforeLast('.').replace(Regex("[^A-Za-z0-9_.-]"), "_")
+        val tempFile = File(context.cacheDir, "run_$base.$ext")
         tempFile.writeText(scriptText)
+        lastTempFile = tempFile
 
+        val pending = PendingRun(tempFile.absolutePath, language, compilerPath, scriptDisplayName)
         if (bound) {
-            runInternal(tempFile.absolutePath)
+            runInternal(pending)
         } else {
-            pendingScriptPath = tempFile.absolutePath
+            pendingRun = pending
             val intent = Intent(context, PythonExecutionService::class.java)
             context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
         }
     }
 
-    /**
-     * New: call on app startup. Checks whether the :pyexec process is
-     * still alive from a PREVIOUS session (the process survives even
-     * after the UI's Activity/process is killed, since it's declared as
-     * a separate manifest process) — if so, reconnects this fresh
-     * ExecutionController to it and reports the real running state via
-     * onStatus, so the UI can restore Run/Stop button state and the
-     * output panel instead of incorrectly assuming nothing is running.
-     *
-     * Known limitation: any output the script produced while the UI was
-     * gone is lost — there's no buffer on the service side — only output
-     * from this point forward streams through again.
-     */
+    private fun deleteTemp() {
+        lastTempFile?.delete()
+        lastTempFile = null
+    }
+
     fun reconnectIfRunning(listener: Listener, onStatus: (running: Boolean) -> Unit) {
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         val targetProcessName = "${context.packageName}:pyexec"
@@ -133,10 +149,13 @@ class ExecutionController(private val context: Context) {
         serviceMessenger?.send(msg)
     }
 
-    private fun runInternal(scriptPath: String) {
+    private fun runInternal(p: PendingRun) {
         val msg = Message.obtain(null, ExecutionProtocol.MSG_RUN)
         msg.replyTo = clientMessenger
-        msg.data.putString(ExecutionProtocol.KEY_SCRIPT_PATH, scriptPath)
+        msg.data.putString(ExecutionProtocol.KEY_SCRIPT_PATH, p.path)
+        msg.data.putString(ExecutionProtocol.KEY_LANGUAGE, p.language)
+        msg.data.putString(ExecutionProtocol.KEY_COMPILER_PATH, p.compilerPath)
+        msg.data.putString(ExecutionProtocol.KEY_FILE_NAME, p.displayName)
         serviceMessenger?.send(msg)
     }
 
@@ -155,6 +174,7 @@ class ExecutionController(private val context: Context) {
         } catch (t: Throwable) { /* already unbound */ }
         bound = false
         serviceMessenger = null
+        deleteTemp()
     }
 
     fun teardown() {

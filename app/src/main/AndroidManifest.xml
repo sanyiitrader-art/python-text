@@ -2,7 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.VIBRATE" />
-    <!-- New: catalog browsing and package installs need the network -->
     <uses-permission android:name="android.permission.INTERNET" />
 
     <application
@@ -30,6 +29,16 @@
             android:name=".DownloadLibraryActivity"
             android:exported="false"
             android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|keyboardHidden|keyboard" />
+
+        <activity
+            android:name=".InstallLanguagesActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden|keyboard" />
+
+        <activity
+            android:name=".WebPreviewActivity"
+            android:exported="false"
             android:configChanges="orientation|screenSize|keyboardHidden|keyboard" />
 
         <service

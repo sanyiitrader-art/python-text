@@ -7,8 +7,10 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.Message
 import android.os.Messenger
+import android.system.Os
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
+import java.io.File
 import java.util.concurrent.LinkedBlockingQueue
 import kotlin.concurrent.thread
 
@@ -17,10 +19,6 @@ class PythonExecutionService : Service() {
     private var clientMessenger: Messenger? = null
     private val stdinQueue = LinkedBlockingQueue<String>()
 
-    // New: tracks whether a script is currently executing, independent
-    // of any particular client connection — this is what lets a freshly
-    // reconnected UI (after the app process was killed and relaunched)
-    // learn the real current state instead of assuming "not running".
     @Volatile
     private var isExecuting = false
 
@@ -75,6 +73,12 @@ class PythonExecutionService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        // Tells pyedit_runner where Download Library installs packages.
+        // Must be set before Python starts so os.environ sees it.
+        try {
+            Os.setenv("PYEDIT_SITE_PACKAGES", File(filesDir, "site-packages").absolutePath, true)
+        } catch (t: Throwable) { /* packages just won't be importable */ }
+
         if (!Python.isStarted()) {
             Python.start(AndroidPlatform(this))
         }

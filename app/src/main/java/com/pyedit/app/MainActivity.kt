@@ -1,7 +1,9 @@
 package com.pyedit.app
 
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -104,6 +106,7 @@ class MainActivity : AppCompatActivity() {
         setupTopBar()
         setupOutsideTapDismiss()
         setupDrawerKeyboardDismiss()
+        setupDownloadLibraryEntry()
         updateActionAvailability(fileController.hasFileOpen)
 
         lifecycleScope.launch {
@@ -129,6 +132,26 @@ class MainActivity : AppCompatActivity() {
         binding.drawerContent.root.layoutParams = params
     }
 
+    /**
+     * Enables ONLY the "Download library" row of the drawer footer (child 1;
+     * child 0 is the divider). "Install other languages" and "Settings"
+     * stay disabled exactly as before.
+     */
+    private fun setupDownloadLibraryEntry() {
+        val row = binding.drawerContent.drawerFooter.getChildAt(1) ?: return
+        row.alpha = 1f
+        row.isEnabled = true
+        row.isClickable = true
+        row.isFocusable = true
+        val tv = TypedValue()
+        if (theme.resolveAttribute(android.R.attr.selectableItemBackground, tv, true)) {
+            row.setBackgroundResource(tv.resourceId)
+        }
+        row.setOnClickListener {
+            startActivity(Intent(this, DownloadLibraryActivity::class.java))
+        }
+    }
+
     private fun hideKeyboardNow() {
         val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
         val token = currentFocus?.windowToken ?: binding.root.windowToken
@@ -144,13 +167,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * FIX item 2: the keyboard used to be hidden only in onDrawerOpened,
-     * which fires after the whole open animation (~0.9s). Now it's also
-     * hidden the instant the hamburger is tapped (see setupTopBar) and
-     * the moment a manual drawer drag begins; onDrawerOpened stays as a
-     * final safety net.
-     */
     private fun setupDrawerKeyboardDismiss() {
         binding.drawerLayout.addDrawerListener(object : DrawerLayout.DrawerListener {
             override fun onDrawerSlide(drawerView: View, slideOffset: Float) {}

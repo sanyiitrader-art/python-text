@@ -1,11 +1,12 @@
 """
 Runs inside the :pyexec process via Chaquopy. Executes the user's script
 with stdout/stderr/stdin redirected to Kotlin-backed objects, and reports
-structured error info (line, type, message) to a dedicated error_reporter
-object rather than leaving the Kotlin side to parse raw traceback text.
+structured error info (line, type, message) to a dedicated error_reporter.
 """
-import sys
 import io
+import os
+import site
+import sys
 import traceback
 
 
@@ -38,10 +39,18 @@ class _ReaderStream(io.TextIOBase):
         return True
 
 
+def _add_site_packages():
+    """Makes packages installed from Download Library importable."""
+    d = os.environ.get("PYEDIT_SITE_PACKAGES")
+    if d and os.path.isdir(d) and d not in sys.path:
+        site.addsitedir(d)
+
+
 def run_script(path, stdout_writer, stderr_writer, stdin_reader, error_reporter):
     sys.stdout = _WriterStream(stdout_writer)
     sys.stderr = _WriterStream(stderr_writer)
     sys.stdin = _ReaderStream(stdin_reader)
+    _add_site_packages()
 
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -65,11 +74,7 @@ def run_script(path, stdout_writer, stderr_writer, stdin_reader, error_reporter)
 
 
 def check_syntax(source_text, display_path):
-    """
-    Spec's "Compile" (§71): syntax/compilation checking only, no
-    execution. Returns (True, None) on success or (False, error_info) on
-    a SyntaxError, WITHOUT running any of the script's code.
-    """
+    """Syntax check only - never executes the script."""
     try:
         compile(source_text, display_path, "exec")
         return True, None

@@ -42,4 +42,23 @@
         android:layout_height="0dp"
         android:layout_weight="1" />
 
+    <!-- Hidden until the page logs something or throws -->
+    <ScrollView
+        android:id="@+id/console_scroll"
+        android:layout_width="match_parent"
+        android:layout_height="140dp"
+        android:background="@color/output_background"
+        android:padding="8dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/tv_console"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="12sp"
+            android:textIsSelectable="true" />
+
+    </ScrollView>
+
 </LinearLayout>

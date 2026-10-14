@@ -39,6 +39,7 @@ class PackageAdapter(
         val name = names[position]
         val info = infoFor(name)
         val b = holder.b
+        val ctx = b.root.context
 
         b.tvPkgName.text = info?.name?.takeIf { it.isNotBlank() } ?: name
 
@@ -59,17 +60,34 @@ class PackageAdapter(
         }
         b.tvPkgVersion.visibility = if (b.tvPkgVersion.text.isEmpty()) View.GONE else View.VISIBLE
 
-        val showNote = info != null && !info.installable && installed == null
-        b.tvPkgNote.visibility = if (showNote) View.VISIBLE else View.GONE
-        if (showNote) b.tvPkgNote.text = "No pure-Python wheel - can't be installed on this device"
+        // Compatibility note, same card style as before
+        var note: String? = null
+        var noteColor = R.color.accent_grey
+        if (installed == null && info != null) {
+            when {
+                info.compat == Compat.INCOMPATIBLE -> {
+                    note = "This package is incompatible with this device." +
+                        (info.reason?.let { "\n$it" } ?: "")
+                    noteColor = R.color.warning_color
+                }
+                info.compat == Compat.UNKNOWN ->
+                    note = info.reason ?: "Compatibility couldn't be determined."
+                info.nativeBuild -> note = "Android native build"
+            }
+        }
+        b.tvPkgNote.visibility = if (note != null) View.VISIBLE else View.GONE
+        if (note != null) {
+            b.tvPkgNote.text = note
+            b.tvPkgNote.setTextColor(ctx.getColor(noteColor))
+        }
 
         val busy = isInstalling(name)
         val (label, enabled) = when {
             busy -> "Installing…" to false
             installed != null -> "Installed" to false
             info == null -> "Install" to false
-            !info.installable -> "Unavailable" to false
-            else -> "Install" to true
+            info.compat == Compat.INCOMPATIBLE -> "Unavailable" to false
+            else -> "Install" to true // INSTALLABLE, or UNKNOWN (installer decides)
         }
         b.btnInstall.text = label
         b.btnInstall.isEnabled = enabled

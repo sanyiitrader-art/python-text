@@ -1,6 +1,7 @@
 package com.pyedit.app
 
 import android.content.Context
+import android.os.Build
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -12,12 +13,17 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
 
+/** INSTALLABLE / INCOMPATIBLE (confirmed) / UNKNOWN (a lookup failed - never shown as incompatible). */
+enum class Compat { INSTALLABLE, INCOMPATIBLE, UNKNOWN }
+
 data class PackageInfo(
     val name: String,
     val version: String,
     val summary: String,
-    /** true only if PyPI lists a pure-Python wheel this runtime could use */
-    val installable: Boolean
+    val compat: Compat,
+    val reason: String?,
+    /** true when the installable build is a native Android wheel */
+    val nativeBuild: Boolean
 )
 
 class PackageCatalog(private val context: Context) {
@@ -26,7 +32,10 @@ class PackageCatalog(private val context: Context) {
     private val topListUrl = "https://hugovk.dev/top-pypi-packages/top-pypi-packages.min.json"
     private val topListMaxAgeMs = 7L * 24 * 60 * 60 * 1000
     private val infoCache = ConcurrentHashMap<String, PackageInfo>()
-    private val gate = Semaphore(4) // at most 4 concurrent PyPI requests
+    private val gate = Semaphore(4)
+
+    // Keep in sync with chaquopy { version = "3.11" } in build.gradle.kts
+    private val pyTag = "cp311"
 
     companion object {
         private val nameRegex = Regex("^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$")
@@ -39,7 +48,6 @@ class PackageCatalog(private val context: Context) {
 
     fun looksLikeName(q: String): Boolean = nameRegex.matches(q)
 
-    /** Popularity-ranked names from the monthly top-15,000 dump. Cached on disk. */
     suspend fun loadNames(forceRefresh: Boolean = false): List<String> = withContext(Dispatchers.IO) {
         val cache = File(context.cacheDir, "top_pypi_names.txt")
         val fresh = cache.exists() && System.currentTimeMillis() - cache.lastModified() < topListMaxAgeMs
@@ -65,7 +73,6 @@ class PackageCatalog(private val context: Context) {
         }
     }
 
-    /** Local, instant. Exact matches first, then prefix, then substring. */
     fun search(query: String, names: List<String>, limit: Int = 100): List<String> {
         val q = fastNorm(query.trim())
         if (q.isEmpty()) return names.take(limit)
@@ -85,10 +92,7 @@ class PackageCatalog(private val context: Context) {
 
     private fun fastNorm(s: String) = s.lowercase().replace('_', '-').replace('.', '-')
 
-    /**
-     * Current metadata from PyPI. Returns null if the project doesn't exist;
-     * throws on network or malformed-response errors.
-     */
+    /** null = project doesn't exist; throws if PyPI itself can't be reached. */
     suspend fun info(name: String): PackageInfo? {
         val key = normalize(name)
         infoCache[key]?.let { return it }
@@ -98,32 +102,69 @@ class PackageCatalog(private val context: Context) {
                 when {
                     code == 404 -> null
                     code != 200 -> throw IOException("PyPI returned HTTP $code")
-                    else -> parse(body).also { infoCache[key] = it }
+                    else -> parse(key, body).also { infoCache[key] = it }
                 }
             }
         }
     }
 
-    private fun parse(body: String): PackageInfo {
+    private fun parse(key: String, body: String): PackageInfo {
         val root = JSONObject(body)
         val info = root.getJSONObject("info")
-        var installable = false
+        var pure = false
         val files = root.optJSONArray("urls")
         if (files != null) {
             for (i in 0 until files.length()) {
                 val fn = files.getJSONObject(i).optString("filename")
-                if (fn.endsWith(".whl") && isPureWheel(fn)) installable = true
+                if (fn.endsWith(".whl") && isPureWheel(fn)) pure = true
             }
         }
-        return PackageInfo(
-            name = info.optString("name"),
-            version = info.optString("version"),
-            summary = info.optString("summary"),
-            installable = installable
+        val name = info.optString("name")
+        val version = info.optString("version")
+        val summary = info.optString("summary")
+        if (pure) return PackageInfo(name, version, summary, Compat.INSTALLABLE, null, false)
+
+        // No pure wheel: look for a native Android build in Chaquopy's index.
+        val (compat, reason) = androidBuildCompat(key)
+        return PackageInfo(name, version, summary, compat, reason, compat == Compat.INSTALLABLE)
+    }
+
+    private fun deviceAbi(): String {
+        val known = setOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+        val is64 = android.os.Process.is64Bit()
+        val abi = Build.SUPPORTED_ABIS.firstOrNull { it in known && it.contains("64") == is64 }
+            ?: Build.SUPPORTED_ABIS.first()
+        return abi.replace('-', '_')
+    }
+
+    private fun androidBuildCompat(key: String): Pair<Compat, String?> {
+        val (code, body) = try {
+            httpGet("https://chaquo.com/pypi-13.1/$key/", 10_000)
+        } catch (e: Exception) {
+            return Pair(Compat.UNKNOWN, "Couldn't check for an Android build (network error).")
+        }
+        if (code == 404) return Pair(Compat.INCOMPATIBLE, "No compatible Android wheel is available.")
+        if (code != 200) return Pair(Compat.UNKNOWN, "Couldn't check for an Android build (HTTP $code).")
+
+        val abi = deviceAbi()
+        val sdk = Build.VERSION.SDK_INT
+        var anyForPython = false
+        for (m in Regex("href=\"([^\"]+\\.whl)\"").findAll(body)) {
+            val fn = m.groupValues[1].substringAfterLast('/')
+            if (!fn.contains("-$pyTag-$pyTag-android_")) continue
+            anyForPython = true
+            val pm = Regex("android_(\\d+)_(\\w+)\\.whl$").find(fn) ?: continue
+            if (pm.groupValues[2] == abi && (pm.groupValues[1].toIntOrNull() ?: 99) <= sdk) {
+                return Pair(Compat.INSTALLABLE, null)
+            }
+        }
+        return Pair(
+            Compat.INCOMPATIBLE,
+            if (anyForPython) "The package does not provide a compatible binary for this ABI ($abi)."
+            else "No Android wheel for Python 3.11 is available."
         )
     }
 
-    /** Wheel filename tags: ...-<python>-<abi>-<platform>.whl, pure = none/any. */
     private fun isPureWheel(filename: String): Boolean {
         val parts = filename.removeSuffix(".whl").split('-')
         if (parts.size < 5) return false
@@ -143,7 +184,6 @@ class PackageCatalog(private val context: Context) {
             c.connectTimeout = timeoutMs
             c.readTimeout = timeoutMs
             c.setRequestProperty("User-Agent", userAgent)
-            c.setRequestProperty("Accept", "application/json")
             val code = c.responseCode
             val stream = if (code in 200..299) c.inputStream else c.errorStream
             val body = stream?.bufferedReader()?.use { it.readText() } ?: ""

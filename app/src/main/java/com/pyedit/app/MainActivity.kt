@@ -193,6 +193,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnRun.setOnClickListener {
             if (fileController.hasFileOpen) executionUiController.onRunStopClicked()
         }
+        binding.btnRun.setOnLongClickListener { executionUiController.showModeDialog(); true }
     }
 
     private fun updateActionAvailability(hasFileOpen: Boolean) {

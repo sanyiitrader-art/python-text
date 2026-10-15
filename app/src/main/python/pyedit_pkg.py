@@ -421,13 +421,24 @@ def _install_one(name, site_dir, st, is_root):
         st["native"].append("%s %s" % (src["name"], src["version"]))
 
 
-def install(name, site_dir, api_level):
+def _device_api():
+    """Real API level of the running device (used only if the caller didn't pass one)."""
+    try:
+        from java import jclass
+        return int(jclass("android.os.Build$VERSION").SDK_INT)
+    except Exception:
+        return 21  # lowest level Chaquopy publishes wheels for; used only if the read fails
+
+
+def install(name, site_dir, api_level=None):
     """Returns (ok, message). Never raises."""
+    if api_level is None:
+        api_level = _device_api()
     os.makedirs(site_dir, exist_ok=True)
     stage = tempfile.mkdtemp(prefix=".stage-", dir=site_dir)
     tmp = tempfile.mkdtemp(prefix=".dl-", dir=site_dir)
     st = {"seen": set(), "installed": [], "skipped": [], "staged": [], "native": [],
-          "stage": stage, "tmp": tmp, "api": api_level}
+          "stage": stage, "tmp": tmp, "api": int(api_level)}
     try:
         _install_one(name, site_dir, st, True)
         for dist_info, tops, _key in st["staged"]:

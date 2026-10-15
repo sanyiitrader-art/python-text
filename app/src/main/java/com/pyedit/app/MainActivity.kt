@@ -26,6 +26,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var editorController: EditorController
+    private lateinit var webProjectController: WebProjectController
     private lateinit var fileController: FileController
     private lateinit var executionUiController: ExecutionUiController
     private lateinit var executionController: ExecutionController
@@ -53,13 +54,15 @@ class MainActivity : AppCompatActivity() {
         recentStore = RecentFilesStore(this)
         executionController = ExecutionController(this)
 
-        // Reconciles the saved TypeScript install with the real files.
         RuntimeInstaller.init(applicationContext)
 
         sizeDrawerToScreenWidth()
 
         editorController = EditorController(this, binding, editorSettings, ::showCrashDiagnostic)
         editorController.setup()
+
+        webProjectController = WebProjectController(this, binding, editorController, workspace)
+        webProjectController.setup()
 
         findReplaceController = FindReplaceController(this, editorController)
 
@@ -76,6 +79,7 @@ class MainActivity : AppCompatActivity() {
             workspace = workspace,
             recentStore = recentStore,
             editorController = editorController,
+            web = webProjectController,
             onFileOpened = { outputSheetController.resetForNewFileIfNeeded() }
         ) { hasFileOpen, _, displayName ->
             binding.tvFilename.text = displayName
@@ -136,10 +140,7 @@ class MainActivity : AppCompatActivity() {
         binding.drawerContent.root.layoutParams = params
     }
 
-    /**
-     * Footer children: 0 = divider, 1 = Download library, 2 = Install other
-     * languages, 3 = Settings (still disabled).
-     */
+    /** Footer children: 0 = divider, 1 = Download library, 2 = Install other languages, 3 = Settings (disabled). */
     private fun setupFooterEntries() {
         enableFooterRow(1, DownloadLibraryActivity::class.java)
         enableFooterRow(2, InstallLanguagesActivity::class.java)
@@ -191,9 +192,16 @@ class MainActivity : AppCompatActivity() {
         }
         binding.btnMenu.setOnClickListener { anchor -> showThreeDotMenu(anchor) }
         binding.btnRun.setOnClickListener {
-            if (fileController.hasFileOpen) executionUiController.onRunStopClicked()
+            if (!fileController.hasFileOpen) return@setOnClickListener
+            // Web projects (.html/.css) run as one combined preview.
+            if (webProjectController.active) webProjectController.runPreview()
+            else executionUiController.onRunStopClicked()
         }
-        binding.btnRun.setOnLongClickListener { executionUiController.showModeDialog(); true }
+        // Long-press Run: choose Auto / Script / Browser mode for JS and TS.
+        binding.btnRun.setOnLongClickListener {
+            executionUiController.showModeDialog()
+            true
+        }
     }
 
     private fun updateActionAvailability(hasFileOpen: Boolean) {

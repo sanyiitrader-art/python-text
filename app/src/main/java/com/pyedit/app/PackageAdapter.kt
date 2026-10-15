@@ -60,11 +60,11 @@ class PackageAdapter(
         }
         b.tvPkgVersion.visibility = if (b.tvPkgVersion.text.isEmpty()) View.GONE else View.VISIBLE
 
-        // Compatibility note, same card style as before
         var note: String? = null
         var noteColor = R.color.accent_grey
         if (installed == null && info != null) {
             when {
+                !info.installSupported -> note = info.reason
                 info.compat == Compat.INCOMPATIBLE -> {
                     note = "This package is incompatible with this device." +
                         (info.reason?.let { "\n$it" } ?: "")
@@ -86,8 +86,9 @@ class PackageAdapter(
             busy -> "Installing…" to false
             installed != null -> "Installed" to false
             info == null -> "Install" to false
+            !info.installSupported -> "Browse only" to false
             info.compat == Compat.INCOMPATIBLE -> "Unavailable" to false
-            else -> "Install" to true // INSTALLABLE, or UNKNOWN (installer decides)
+            else -> "Install" to true
         }
         b.btnInstall.text = label
         b.btnInstall.isEnabled = enabled

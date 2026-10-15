@@ -34,6 +34,10 @@ class DownloadLibraryActivity : AppCompatActivity() {
     private val tabViews = mutableListOf<TextView>()
     private var selectedTab = 0
 
+    // tab index -> registry source (browse-only catalogs)
+    private val registryTabs = mapOf(1 to "npm", 2 to "npm-ts", 4 to "gems")
+
+    // --- Python catalog state ---
     private var allNames: List<String> = emptyList()
     private var namesLoading = false
     private var namesError: String? = null
@@ -45,6 +49,12 @@ class DownloadLibraryActivity : AppCompatActivity() {
     private val installing = mutableSetOf<String>()
     private val infoRequested = mutableSetOf<String>()
     private val infoFailed = mutableSetOf<String>()
+
+    // --- registry catalog state ---
+    private val registryInfo = HashMap<String, PackageInfo>()
+    private var registryJob: Job? = null
+    private var registryLoading = false
+    private var registryError: String? = null
 
     private var keyboardSeen = false
 
@@ -89,10 +99,16 @@ class DownloadLibraryActivity : AppCompatActivity() {
         selectedTab = index
         tabViews.forEachIndexed { i, tv ->
             val selected = i == index
-            // Selected: transparent grey, square corners (plain rectangle drawable)
             tv.setBackgroundResource(if (selected) R.drawable.tab_selected_bg else 0)
             tv.setTextColor(getColor(if (selected) R.color.text_normal else R.color.text_comment))
         }
+        lookupJob?.cancel()
+        registryJob?.cancel()
+        lookingUp = false
+        registryLoading = false
+        registryError = null
+        results = emptyList()
+        adapter.submit(results)
         applyQuery()
     }
 
@@ -100,10 +116,13 @@ class DownloadLibraryActivity : AppCompatActivity() {
 
     private fun setupList() {
         adapter = PackageAdapter(
-            infoFor = { catalog.cachedInfo(it) },
-            infoFailed = { infoFailed.contains(PackageCatalog.normalize(it)) },
-            installedVersion = { installedVersions[PackageCatalog.normalize(it)] },
-            isInstalling = { installing.contains(PackageCatalog.normalize(it)) },
+            infoFor = {
+                if (selectedTab == 0) catalog.cachedInfo(it)
+                else registryInfo[PackageCatalog.normalize(it)]
+            },
+            infoFailed = { selectedTab == 0 && infoFailed.contains(PackageCatalog.normalize(it)) },
+            installedVersion = { if (selectedTab == 0) installedVersions[PackageCatalog.normalize(it)] else null },
+            isInstalling = { selectedTab == 0 && installing.contains(PackageCatalog.normalize(it)) },
             onNeedInfo = { requestInfo(it) },
             onInstall = { install(it) }
         )
@@ -112,6 +131,7 @@ class DownloadLibraryActivity : AppCompatActivity() {
     }
 
     private fun requestInfo(name: String) {
+        if (selectedTab != 0) return
         val key = PackageCatalog.normalize(name)
         if (!infoRequested.add(key)) return
         lifecycleScope.launch {
@@ -157,7 +177,6 @@ class DownloadLibraryActivity : AppCompatActivity() {
             }
         }
 
-        // Filtering happens on every keystroke, not on the icon tap.
         edit.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
             override fun onTextChanged(s: CharSequence?, st: Int, b: Int, c: Int) {}
@@ -173,8 +192,6 @@ class DownloadLibraryActivity : AppCompatActivity() {
 
         binding.btnSearchIcon.setOnClickListener { endSearchEditing() }
 
-        // If the keyboard is dismissed some other way (system Back / swipe),
-        // return the box to its inactive state too.
         binding.root.viewTreeObserver.addOnGlobalLayoutListener {
             val r = Rect()
             binding.root.getWindowVisibleDisplayFrame(r)
@@ -195,18 +212,23 @@ class DownloadLibraryActivity : AppCompatActivity() {
         binding.editSearch.isCursorVisible = active
     }
 
-    /** Ends editing but keeps the typed text and the filtered results. */
     private fun endSearchEditing() {
         val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
         imm.hideSoftInputFromWindow(binding.editSearch.windowToken, 0)
         binding.editSearch.clearFocus()
-        binding.root.requestFocus() // root is focusable-in-touch-mode, so focus doesn't bounce back
+        binding.root.requestFocus()
         setSearchActive(false)
     }
 
     private fun applyQuery() {
-        if (selectedTab != 0) { render(); return }
+        when {
+            selectedTab == 0 -> applyPythonQuery()
+            registryTabs.containsKey(selectedTab) -> runRegistrySearch()
+            else -> render() // Lua / PHP / Web: "Not Yet"
+        }
+    }
 
+    private fun applyPythonQuery() {
         val q = binding.editSearch.text.toString().trim()
         results = catalog.search(q, allNames)
         adapter.submit(results)
@@ -217,8 +239,9 @@ class DownloadLibraryActivity : AppCompatActivity() {
             lookingUp = true
             lookupJob = lifecycleScope.launch {
                 try {
-                    delay(450) // be polite to PyPI while typing
+                    delay(450)
                     val found = catalog.info(q)
+                    if (selectedTab != 0) return@launch
                     if (found != null) {
                         val key = PackageCatalog.normalize(found.name)
                         if (results.none { PackageCatalog.normalize(it) == key }) {
@@ -229,13 +252,50 @@ class DownloadLibraryActivity : AppCompatActivity() {
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    // exact lookup is best-effort; the local list result stands
+                    // exact lookup is best-effort
                 }
                 lookingUp = false
                 render()
             }
         }
         render()
+    }
+
+    private fun runRegistrySearch() {
+        val source = registryTabs[selectedTab] ?: return
+        registryJob?.cancel()
+        val q = binding.editSearch.text.toString().trim()
+
+        if (source == "gems" && q.isEmpty()) {
+            results = emptyList()
+            registryError = null
+            registryLoading = false
+            adapter.submit(results)
+            render()
+            return
+        }
+
+        registryLoading = true
+        registryError = null
+        render()
+        registryJob = lifecycleScope.launch {
+            try {
+                if (q.isNotEmpty()) delay(400)
+                val found = RegistryCatalog.search(source, q)
+                registryInfo.clear()
+                found.forEach { registryInfo[PackageCatalog.normalize(it.name)] = it }
+                results = found.map { it.name }
+                registryError = null
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                results = emptyList()
+                registryError = e.message ?: "Network error"
+            }
+            registryLoading = false
+            adapter.submit(results)
+            render()
+        }
     }
 
     // --- states ---------------------------------------------------------
@@ -246,30 +306,37 @@ class DownloadLibraryActivity : AppCompatActivity() {
         b.tvRetry.visibility = View.GONE
         b.tvStatus.visibility = View.GONE
         b.rvPackages.visibility = View.GONE
-
-        if (selectedTab != 0) {
-            b.tvStatus.text = "Not Yet"
-            b.tvStatus.visibility = View.VISIBLE
-            return
+        b.tvRetry.setOnClickListener {
+            if (selectedTab == 0) loadNames(true) else runRegistrySearch()
         }
 
+        fun status(text: String) { b.tvStatus.text = text; b.tvStatus.visibility = View.VISIBLE }
+
         when {
-            namesLoading || (lookingUp && results.isEmpty()) -> b.progress.visibility = View.VISIBLE
-            namesError != null && results.isEmpty() -> {
-                b.tvStatus.text = "Couldn't load the package list\n$namesError"
-                b.tvStatus.visibility = View.VISIBLE
-                b.tvRetry.visibility = View.VISIBLE
-                b.tvRetry.setOnClickListener { loadNames(true) }
+            selectedTab == 0 -> when {
+                namesLoading || (lookingUp && results.isEmpty()) -> b.progress.visibility = View.VISIBLE
+                namesError != null && results.isEmpty() -> {
+                    status("Couldn't load the package list\n$namesError")
+                    b.tvRetry.visibility = View.VISIBLE
+                }
+                results.isEmpty() -> status("No packages found")
+                else -> b.rvPackages.visibility = View.VISIBLE
             }
-            results.isEmpty() -> {
-                b.tvStatus.text = "No packages found"
-                b.tvStatus.visibility = View.VISIBLE
+            registryTabs.containsKey(selectedTab) -> when {
+                registryLoading -> b.progress.visibility = View.VISIBLE
+                registryError != null -> {
+                    status("Couldn't load packages\n$registryError")
+                    b.tvRetry.visibility = View.VISIBLE
+                }
+                selectedTab == 4 && binding.editSearch.text.isNullOrBlank() -> status("Type to search RubyGems")
+                results.isEmpty() -> status("No packages found")
+                else -> b.rvPackages.visibility = View.VISIBLE
             }
-            else -> b.rvPackages.visibility = View.VISIBLE
+            else -> status("Not Yet")
         }
     }
 
-    // --- install --------------------------------------------------------
+    // --- install (Python only) ------------------------------------------
 
     private fun refreshInstalled() {
         lifecycleScope.launch {
@@ -283,8 +350,9 @@ class DownloadLibraryActivity : AppCompatActivity() {
     }
 
     private fun install(name: String) {
+        if (selectedTab != 0) return
         val key = PackageCatalog.normalize(name)
-        if (!installing.add(key)) return // blocks duplicate attempts
+        if (!installing.add(key)) return
         adapter.refresh(name)
 
         lifecycleScope.launch {

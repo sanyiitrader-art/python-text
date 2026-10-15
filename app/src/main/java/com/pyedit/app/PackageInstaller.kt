@@ -1,6 +1,7 @@
 package com.pyedit.app
 
 import android.content.Context
+import android.os.Build
 import com.chaquo.python.PyObject
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
@@ -19,15 +20,15 @@ class PackageInstaller(private val context: Context) {
         Python.getInstance().getModule("pyedit_pkg")
     }
 
-    /** normalized package name -> installed version */
     fun installedVersions(): Map<String, String> {
         val map = module().callAttr("list_installed", siteDir.absolutePath).asMap()
         return map.entries.associate { PackageCatalog.normalize(it.key.toString()) to it.value.toString() }
     }
 
+    /** The device's real API level is passed on every install. */
     fun install(name: String): Result {
         return try {
-            val r = module().callAttr("install", name, siteDir.absolutePath).asList()
+            val r = module().callAttr("install", name, siteDir.absolutePath, Build.VERSION.SDK_INT).asList()
             Result(r[0].toBoolean(), r[1].toString())
         } catch (t: Throwable) {
             Result(false, "Install failed: ${t.message}")

@@ -30,6 +30,7 @@ class FileController(
     private val workspace: WorkspaceManager,
     private val recentStore: RecentFilesStore,
     private val editorController: EditorController,
+    private val web: WebProjectController,
     private val onFileOpened: () -> Unit,
     private val onStateChanged: (hasFileOpen: Boolean, isDirty: Boolean, displayName: String) -> Unit
 ) {
@@ -59,8 +60,6 @@ class FileController(
     private data class Draft(val recent: RecentFilesStore.RecentFile, val doc: DocumentFile, val content: String)
 
     fun setup() {
-        // Item 2: the main plate stays hidden until init() has decided
-        // what to show, so the first-launch buttons can never flash.
         binding.mainWorkspaceView.root.visibility = View.GONE
 
         editorController.onContentChanged { markDirty() }
@@ -75,12 +74,9 @@ class FileController(
             }
         }
 
-        // Item 6: Cancel / Save buttons shown while naming
         binding.drawerContent.btnNamingCancel.setOnClickListener { cancelNaming() }
         binding.drawerContent.btnNamingSave.setOnClickListener { fileTreeAdapter.confirmCurrentEditIfValid() }
 
-        // Item 6: tapping any non-reactive spot now CANCELS naming
-        // (it used to try to save).
         binding.drawerContent.root.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
                 cancelNaming()
@@ -93,7 +89,6 @@ class FileController(
             false
         }
 
-        // Closing the drawer by any route also cancels an unfinished naming.
         binding.drawerLayout.addDrawerListener(object : DrawerLayout.SimpleDrawerListener() {
             override fun onDrawerClosed(drawerView: View) { cancelNaming() }
         })
@@ -135,11 +130,24 @@ class FileController(
         restoreLastSessionOrDefault()
     }
 
-    /**
-     * Called from MainActivity.onPause. Besides the cursor position it
-     * now also stores the unsaved text (item 2), so killing the app
-     * brings the file back exactly as it was.
-     */
+    // --- disk / draft helpers (web projects write three files) ----------------
+
+    /** Writes the open file; returns the tabs that couldn't be saved (web mode only). */
+    private fun writeOpenFileToDisk(doc: DocumentFile): List<String> {
+        if (web.active) return web.saveAll()
+        workspace.saveFile(doc, editorController.getText())
+        return emptyList()
+    }
+
+    private fun storeDraft(doc: DocumentFile) {
+        if (web.active) web.writeDraft() else workspace.writeRecovery(doc, editorController.getText())
+    }
+
+    private fun clearDraft(doc: DocumentFile) {
+        web.clearDraft(doc)
+        workspace.clearRecovery(doc)
+    }
+
     fun persistCurrentCursorPosition() {
         val doc = currentFileDoc ?: return
         persistDraftIfDirty()
@@ -149,22 +157,20 @@ class FileController(
         }
     }
 
-    /**
-     * Items 2-4: unsaved text is kept as a per-file draft (never written
-     * to the real file unless autosave is on). With autosave on it goes
-     * to disk instead.
-     */
     private fun persistDraftIfDirty() {
         val doc = currentFileDoc ?: return
         if (!isDirty || !doc.exists()) return
-        val content = editorController.getText()
         if (autosaveEnabled) {
-            workspace.saveFile(doc, content)
-            workspace.clearRecovery(doc)
-            isDirty = false
-            notifyState()
+            val failed = writeOpenFileToDisk(doc)
+            if (failed.isEmpty()) {
+                clearDraft(doc)
+                isDirty = false
+                notifyState()
+            } else {
+                storeDraft(doc)
+            }
         } else {
-            workspace.writeRecovery(doc, content)
+            storeDraft(doc)
         }
     }
 
@@ -187,13 +193,14 @@ class FileController(
         val runnable = Runnable {
             val doc = currentFileDoc ?: return@Runnable
             if (!doc.exists()) return@Runnable
-            val content = editorController.getText()
-            workspace.writeRecovery(doc, content)
+            storeDraft(doc)
             if (autosaveEnabled) {
-                workspace.saveFile(doc, content)
-                workspace.clearRecovery(doc)
-                isDirty = false
-                notifyState()
+                val failed = writeOpenFileToDisk(doc)
+                if (failed.isEmpty()) {
+                    clearDraft(doc)
+                    isDirty = false
+                    notifyState()
+                }
             }
         }
         autosaveRunnable = runnable
@@ -271,10 +278,11 @@ class FileController(
         }
     }
 
+    /** In web-project mode the draggable output panel stays hidden. */
     fun showEditorState() {
         binding.mainWorkspaceView.root.visibility = View.GONE
         binding.editorContainer.visibility = View.VISIBLE
-        binding.outputPanel.root.visibility = View.VISIBLE
+        binding.outputPanel.root.visibility = if (web.active) View.GONE else View.VISIBLE
     }
 
     private fun setupMainWorkspaceView() {
@@ -294,21 +302,27 @@ class FileController(
     }
 
     /**
-     * Loads a file, preferring its stored unsaved draft over the disk
-     * content (items 2, 3, 4). The draft stays unsaved: the file is
-     * marked dirty, nothing is written to disk.
+     * .html/.htm/.css open as a three-tab web project; everything else
+     * loads exactly as before. Unsaved text comes back as a draft either way.
      */
     private fun loadFileIntoEditor(doc: DocumentFile) {
-        val draft = workspace.readRecoveryIfDifferent(doc)
-        editorController.loadText(draft ?: workspace.readFile(doc))
+        val lang = Languages.forFileName(doc.name ?: "")
         currentFileDoc = doc
-        isDirty = draft != null
         hasFileOpen = true
+        if (lang == Lang.WEB || lang == Lang.CSS) {
+            val parent = doc.parentFile
+                ?: rootTreeUri?.let { web.findParent(DocumentFile.fromTreeUri(activity, it), doc.uri) }
+            web.enter(doc, workspace.readFile(doc), parent)
+            editorController.loadText(web.currentText())
+            isDirty = web.applyDraftIfAny()
+        } else {
+            web.leave()
+            val draft = workspace.readRecoveryIfDifferent(doc)
+            editorController.loadText(draft ?: workspace.readFile(doc))
+            isDirty = draft != null
+        }
     }
 
-    /** Items 3 + 4: switching files no longer asks anything. The file
-     * being left keeps its unsaved text as a draft, and any file that
-     * has a draft opens with it — from any list. */
     fun openFile(doc: DocumentFile) {
         if (!doc.exists()) {
             Toast.makeText(activity, "That file no longer exists", Toast.LENGTH_SHORT).show()
@@ -346,14 +360,26 @@ class FileController(
             showSaveAsDialog(onDone)
             return
         }
-        workspace.saveFile(doc, editorController.getText())
-        workspace.clearRecovery(doc)
+        val failed = writeOpenFileToDisk(doc)
+        if (failed.isNotEmpty()) {
+            Toast.makeText(
+                activity,
+                "Couldn't save the ${failed.joinToString(" and ")} tab. Open the whole folder (Open Folder) so its file can be created.",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+        clearDraft(doc)
         isDirty = false
         notifyState()
         onDone()
     }
 
     fun showSaveAsDialog(onDone: () -> Unit = {}) {
+        if (web.active) {
+            Toast.makeText(activity, "Save As isn't available for web projects yet.", Toast.LENGTH_SHORT).show()
+            return
+        }
         val uri = rootTreeUri
         if (uri == null) {
             Toast.makeText(activity, "Open a folder first to Save As into it", Toast.LENGTH_SHORT).show()
@@ -395,14 +421,12 @@ class FileController(
         dialog.show()
     }
 
-    /** Back-press exit keeps its warning; Discard now also deletes the
-     * draft so it can't come back on the next launch. */
     fun checkUnsavedThenExit(proceed: () -> Unit) {
         if (isDirty) {
             showUnsavedExitDialog(
                 onSave = { saveCurrentFile { proceed() } },
                 onDiscard = {
-                    currentFileDoc?.let { workspace.clearRecovery(it) }
+                    currentFileDoc?.let { clearDraft(it) }
                     proceed()
                 }
             )
@@ -472,11 +496,6 @@ class FileController(
         binding.drawerContent.tvClearRecent.setOnClickListener { onClearRecentClicked() }
     }
 
-    /**
-     * Item 5: Clear warns only when it would throw away unsaved text of
-     * files OTHER than the open one. Save writes those drafts to disk
-     * first; Discard deletes them; the open file is never touched.
-     */
     private fun onClearRecentClicked() {
         activity.lifecycleScope.launch {
             val currentUri = currentFileDoc?.uri?.toString()
@@ -527,7 +546,7 @@ class FileController(
     }
 
     private fun isNameTaken(candidateName: String, target: FileTreeAdapter.EditTarget): Boolean {
-        val fileName = if (candidateName.endsWith(".py")) candidateName else "$candidateName.py"
+        val fileName = if (Languages.isDiscoverable(candidateName)) candidateName else "$candidateName.py"
         val parentDoc = when (target) {
             is FileTreeAdapter.EditTarget.NewFile ->
                 rootTreeUri?.let { DocumentFile.fromTreeUri(activity, it) }
@@ -554,8 +573,7 @@ class FileController(
                 refreshFolderBrowseViews()
             }
         } else {
-            val normalizedNew = if (newName.endsWith(".py")) newName else "$newName.py"
-            if (normalizedNew != existing.name) {
+            if (newName != existing.name) {
                 val renamed = workspace.renameFile(existing.doc, newName)
                 if (!renamed) {
                     Toast.makeText(activity, "Could not rename file", Toast.LENGTH_SHORT).show()
@@ -595,11 +613,12 @@ class FileController(
             .setPositiveButton(R.string.action_delete) { _, _ ->
                 val deleted = workspace.deleteFile(leaf.doc)
                 if (deleted) {
-                    workspace.clearRecovery(leaf.doc)
+                    clearDraft(leaf.doc)
                     if (currentFileDoc?.uri == leaf.doc.uri) {
                         currentFileDoc = null
                         hasFileOpen = false
                         isDirty = false
+                        web.leave()
                         notifyState()
                         showEmptyState()
                     }

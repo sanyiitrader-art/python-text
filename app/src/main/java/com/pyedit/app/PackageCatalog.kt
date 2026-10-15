@@ -23,7 +23,9 @@ data class PackageInfo(
     val compat: Compat,
     val reason: String?,
     /** true when the installable build is a native Android wheel */
-    val nativeBuild: Boolean
+    val nativeBuild: Boolean,
+    /** false for browse-only catalogs (npm, RubyGems): no install path exists */
+    val installSupported: Boolean = true
 )
 
 class PackageCatalog(private val context: Context) {

@@ -130,13 +130,20 @@ class FileController(
         restoreLastSessionOrDefault()
     }
 
-    // --- disk / draft helpers (web projects write three files) ----------------
+    // --- disk / draft helpers --------------------------------------------------
 
-    /** Writes the open file; returns the tabs that couldn't be saved (web mode only). */
+    /**
+     * Writes the open file. Returns an empty list on success, otherwise the
+     * reasons / tab names that failed (nothing is marked saved on failure).
+     */
     private fun writeOpenFileToDisk(doc: DocumentFile): List<String> {
         if (web.active) return web.saveAll()
-        workspace.saveFile(doc, editorController.getText())
-        return emptyList()
+        return try {
+            workspace.saveFile(doc, editorController.getText())
+            emptyList()
+        } catch (e: Exception) {
+            listOf(e.message ?: "write failed")
+        }
     }
 
     private fun storeDraft(doc: DocumentFile) {
@@ -147,6 +154,10 @@ class FileController(
         web.clearDraft(doc)
         workspace.clearRecovery(doc)
     }
+
+    private fun parentOf(doc: DocumentFile): DocumentFile? =
+        doc.parentFile
+            ?: rootTreeUri?.let { web.findParent(DocumentFile.fromTreeUri(activity, it), doc.uri) }
 
     fun persistCurrentCursorPosition() {
         val doc = currentFileDoc ?: return
@@ -278,7 +289,6 @@ class FileController(
         }
     }
 
-    /** In web-project mode the draggable output panel stays hidden. */
     fun showEditorState() {
         binding.mainWorkspaceView.root.visibility = View.GONE
         binding.editorContainer.visibility = View.VISIBLE
@@ -301,18 +311,12 @@ class FileController(
         binding.mainWorkspaceView.btnOpenFile.setOnClickListener { launchOpenFile() }
     }
 
-    /**
-     * .html/.htm/.css open as a three-tab web project; everything else
-     * loads exactly as before. Unsaved text comes back as a draft either way.
-     */
     private fun loadFileIntoEditor(doc: DocumentFile) {
         val lang = Languages.forFileName(doc.name ?: "")
         currentFileDoc = doc
         hasFileOpen = true
         if (lang == Lang.WEB || lang == Lang.CSS) {
-            val parent = doc.parentFile
-                ?: rootTreeUri?.let { web.findParent(DocumentFile.fromTreeUri(activity, it), doc.uri) }
-            web.enter(doc, workspace.readFile(doc), parent)
+            web.enter(doc, workspace.readFile(doc), parentOf(doc))
             editorController.loadText(web.currentText())
             isDirty = web.applyDraftIfAny()
         } else {
@@ -362,17 +366,90 @@ class FileController(
         }
         val failed = writeOpenFileToDisk(doc)
         if (failed.isNotEmpty()) {
-            Toast.makeText(
-                activity,
-                "Couldn't save the ${failed.joinToString(" and ")} tab. Open the whole folder (Open Folder) so its file can be created.",
-                Toast.LENGTH_LONG
-            ).show()
+            val msg = if (web.active)
+                "Couldn't save the ${failed.joinToString(" and ")} tab. Open the whole folder (Open Folder) so its file can be created."
+            else
+                "Couldn't save ${doc.name}: ${failed.first()}"
+            Toast.makeText(activity, msg, Toast.LENGTH_LONG).show()
             return
         }
         clearDraft(doc)
         isDirty = false
         notifyState()
         onDone()
+    }
+
+    /**
+     * Save All: the open file plus every other recent file that has unsaved
+     * text (plain drafts and web-project drafts). A file is only counted as
+     * saved after a successful write; failures are listed, never swallowed.
+     */
+    fun saveAll() {
+        val currentUri = currentFileDoc?.uri?.toString()
+        val saved = ArrayList<String>()
+        val failed = ArrayList<String>()
+
+        currentFileDoc?.let { doc ->
+            if (isDirty) {
+                val name = doc.name ?: "current file"
+                if (!doc.exists()) {
+                    failed.add("$name (file no longer exists)")
+                } else {
+                    val bad = writeOpenFileToDisk(doc)
+                    if (bad.isEmpty()) {
+                        clearDraft(doc)
+                        isDirty = false
+                        notifyState()
+                        saved.add(name)
+                    } else {
+                        failed.add("$name (${bad.joinToString(", ")})")
+                    }
+                }
+            }
+        }
+
+        activity.lifecycleScope.launch {
+            val recents = recentStore.recentFiles.first()
+            for (r in recents) {
+                if (r.uriString == currentUri) continue
+                val doc = DocumentFile.fromSingleUri(activity, Uri.parse(r.uriString)) ?: continue
+                if (!doc.exists()) continue
+                val name = doc.name ?: r.name
+                val lang = Languages.forFileName(name)
+
+                if (lang == Lang.WEB || lang == Lang.CSS) {
+                    val result = web.saveStoredDraft(doc, parentOf(doc)) ?: continue
+                    if (result.second.isNotEmpty()) failed.add("$name (${result.second.joinToString(", ")} tab)")
+                    else if (result.first) saved.add(name)
+                } else {
+                    val content = workspace.readRecoveryIfDifferent(doc) ?: continue
+                    try {
+                        workspace.saveFile(doc, content)
+                        workspace.clearRecovery(doc)
+                        saved.add(name)
+                    } catch (e: Exception) {
+                        failed.add("$name (${e.message ?: "write failed"})")
+                    }
+                }
+            }
+
+            when {
+                failed.isNotEmpty() -> AlertDialog.Builder(activity)
+                    .setTitle("Some files weren't saved")
+                    .setMessage(
+                        (if (saved.isNotEmpty()) "Saved: ${saved.joinToString(", ")}\n\n" else "") +
+                            "Not saved (your changes are kept):\n" + failed.joinToString("\n") { "• $it" }
+                    )
+                    .setPositiveButton("OK", null)
+                    .show()
+                saved.isEmpty() -> Toast.makeText(activity, "Nothing to save", Toast.LENGTH_SHORT).show()
+                else -> Toast.makeText(
+                    activity,
+                    "Saved ${saved.size} file${if (saved.size == 1) "" else "s"}",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
     }
 
     fun showSaveAsDialog(onDone: () -> Unit = {}) {
@@ -394,7 +471,12 @@ class FileController(
                 if (name.isNotEmpty()) {
                     val newDoc = workspace.createNewFileInTree(uri, name)
                     if (newDoc != null) {
-                        workspace.saveFile(newDoc, editorController.getText())
+                        try {
+                            workspace.saveFile(newDoc, editorController.getText())
+                        } catch (e: Exception) {
+                            Toast.makeText(activity, "Couldn't save: ${e.message}", Toast.LENGTH_LONG).show()
+                            return@setPositiveButton
+                        }
                         currentFileDoc = newDoc
                         isDirty = false
                         hasFileOpen = true
@@ -516,11 +598,24 @@ class FileController(
 
             showUnsavedExitDialog(
                 onSave = {
-                    drafts.forEach {
-                        workspace.saveFile(it.doc, it.content)
-                        workspace.clearRecovery(it.doc)
+                    val failed = ArrayList<String>()
+                    for (d in drafts) {
+                        try {
+                            workspace.saveFile(d.doc, d.content)
+                            workspace.clearRecovery(d.doc)
+                        } catch (e: Exception) {
+                            failed.add(d.doc.name ?: d.recent.name)
+                        }
                     }
-                    activity.lifecycleScope.launch { recentStore.clearRecent(currentUri) }
+                    if (failed.isEmpty()) {
+                        activity.lifecycleScope.launch { recentStore.clearRecent(currentUri) }
+                    } else {
+                        Toast.makeText(
+                            activity,
+                            "Couldn't save: ${failed.joinToString(", ")}. The Recent list was not cleared.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
                 },
                 onDiscard = {
                     drafts.forEach { workspace.clearRecovery(it.doc) }

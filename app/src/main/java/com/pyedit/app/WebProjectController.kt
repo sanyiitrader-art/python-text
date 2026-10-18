@@ -171,7 +171,6 @@ class WebProjectController(
         draftFile(doc).writeText(o.toString())
     }
 
-    /** Restores unsaved edits for the open file if there are any. */
     fun applyDraftIfAny(): Boolean {
         val doc = primaryDoc ?: return false
         val f = draftFile(doc)
@@ -196,7 +195,42 @@ class WebProjectController(
         draftFile(doc).delete()
     }
 
-    /** Folder containing [target], found by walking the opened folder tree. */
+    /**
+     * Save All support: writes the stored (not currently open) draft of a web
+     * project to its files. Returns null if there is no draft, otherwise
+     * (wroteAnything, namesOfTabsThatFailed). The draft is deleted only when
+     * every tab was written.
+     */
+    fun saveStoredDraft(doc: DocumentFile, parentFolder: DocumentFile?): Pair<Boolean, List<String>>? {
+        val f = draftFile(doc)
+        if (!f.exists()) return null
+        val o = try { JSONObject(f.readText()) } catch (e: Exception) { return null }
+        val texts = arrayOf(o.optString("html"), o.optString("css"), o.optString("js"))
+        val name = doc.name ?: return null
+        val stem = name.substringBeforeLast('.')
+        val primary = if (Languages.forFileName(name) == Lang.CSS) 1 else 0
+        val failed = ArrayList<String>()
+        var wrote = false
+        for (i in 0..2) {
+            var d: DocumentFile? = if (i == primary) doc else parentFolder?.findFile("$stem.${exts[i]}")
+            val onDisk = if (d != null && d.isFile) workspace.readFile(d) else ""
+            if (texts[i] == onDisk) continue
+            if (d == null || !d.exists()) {
+                if (texts[i].isBlank()) continue
+                d = parentFolder?.createFile("application/octet-stream", "$stem.${exts[i]}")
+                if (d == null) { failed.add(labels[i]); continue }
+            }
+            try {
+                workspace.saveFile(d, texts[i])
+                wrote = true
+            } catch (e: Exception) {
+                failed.add(labels[i])
+            }
+        }
+        if (failed.isEmpty()) f.delete()
+        return Pair(wrote, failed)
+    }
+
     fun findParent(root: DocumentFile?, target: Uri): DocumentFile? {
         if (root == null) return null
         for (child in root.listFiles()) {
@@ -218,13 +252,25 @@ class WebProjectController(
         }
     }
 
+    /** Also records where the JS tab starts in the combined page, so the
+     * preview can report errors as "JS tab, line N". */
     private fun buildPreview(): String {
         val css = buffers[1]
         val js = buffers[2].replace(Regex("</script", RegexOption.IGNORE_CASE), "<\\\\/script")
         val style = if (css.isNotBlank()) "<style>\n$css\n</style>" else ""
         val script = if (js.isNotBlank()) "<script>\n$js\n</script>" else ""
         var html = insertBefore(buffers[0], "</head>", style, false)
-        html = insertBefore(html, "</body>", script, true) // after the page's elements exist
+        html = insertBefore(html, "</body>", script, true)
+
+        WebPreviewHolder.jsFirstLine = 0
+        WebPreviewHolder.jsLineCount = 0
+        if (script.isNotEmpty()) {
+            val idx = html.lastIndexOf(script)
+            if (idx >= 0) {
+                WebPreviewHolder.jsFirstLine = html.substring(0, idx).count { it == '\n' } + 2
+                WebPreviewHolder.jsLineCount = js.count { it == '\n' } + 1
+            }
+        }
         return html
     }
 

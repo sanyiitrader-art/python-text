@@ -193,11 +193,9 @@ class MainActivity : AppCompatActivity() {
         binding.btnMenu.setOnClickListener { anchor -> showThreeDotMenu(anchor) }
         binding.btnRun.setOnClickListener {
             if (!fileController.hasFileOpen) return@setOnClickListener
-            // Web projects (.html/.css) run as one combined preview.
             if (webProjectController.active) webProjectController.runPreview()
             else executionUiController.onRunStopClicked()
         }
-        // Long-press Run: choose Auto / Script / Browser mode for JS and TS.
         binding.btnRun.setOnLongClickListener {
             executionUiController.showModeDialog()
             true
@@ -230,10 +228,9 @@ class MainActivity : AppCompatActivity() {
 
         val hasFileOpen = fileController.hasFileOpen
         val items = listOf(
-            popupBinding.menuItemSave, popupBinding.menuItemSaveAs,
+            popupBinding.menuItemSave, popupBinding.menuItemSaveAll, popupBinding.menuItemSaveAs,
             popupBinding.menuItemFind, popupBinding.menuItemReplace,
-            popupBinding.menuItemGoToLine, popupBinding.menuItemCompile,
-            popupBinding.menuItemEditorSettings
+            popupBinding.menuItemGoToLine, popupBinding.menuItemCompile
         )
         items.forEach { it.isEnabled = hasFileOpen; it.alpha = if (hasFileOpen) 1f else 0.35f }
         popupBinding.checkboxAutosave.isEnabled = hasFileOpen
@@ -246,8 +243,8 @@ class MainActivity : AppCompatActivity() {
 
         if (hasFileOpen) {
             popupBinding.menuItemSave.setOnClickListener { popup.dismiss(); fileController.saveCurrentFile() }
+            popupBinding.menuItemSaveAll.setOnClickListener { popup.dismiss(); fileController.saveAll() }
             popupBinding.menuItemSaveAs.setOnClickListener { popup.dismiss(); fileController.showSaveAsDialog() }
-            popupBinding.menuItemEditorSettings.setOnClickListener { popup.dismiss(); editorController.showEditorSettingsDialog() }
             popupBinding.menuItemCompile.setOnClickListener { popup.dismiss(); executionUiController.runCompileCheck() }
             popupBinding.menuItemFind.setOnClickListener { popup.dismiss(); findReplaceController.showFindDialog() }
             popupBinding.menuItemReplace.setOnClickListener { popup.dismiss(); findReplaceController.showReplaceDialog() }

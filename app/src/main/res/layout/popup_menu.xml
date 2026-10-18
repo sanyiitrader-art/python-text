@@ -13,6 +13,7 @@
     <TextView android:id="@+id/menu_item_open_file" android:text="@string/open_file" style="@style/PopupMenuItem" />
     <TextView android:id="@+id/menu_item_open_folder" android:text="@string/open_folder" style="@style/PopupMenuItem" />
     <TextView android:id="@+id/menu_item_save" android:text="@string/menu_save" style="@style/PopupMenuItem" />
+    <TextView android:id="@+id/menu_item_save_all" android:text="Save All" style="@style/PopupMenuItem" />
     <TextView android:id="@+id/menu_item_save_as" android:text="@string/menu_save_as" style="@style/PopupMenuItem" />
 
     <LinearLayout
@@ -25,7 +26,6 @@
             android:text="@string/menu_autosave"
             android:textColor="@color/text_normal"
             android:textSize="14sp" />
-        <!-- Item 7: checkbox tint grey -->
         <CheckBox
             android:id="@+id/checkbox_autosave"
             android:layout_width="wrap_content"
@@ -44,10 +44,5 @@
 
     <TextView android:text="@string/menu_python" style="@style/PopupMenuSectionLabel" />
     <TextView android:id="@+id/menu_item_compile" android:text="@string/menu_compile" style="@style/PopupMenuItem" />
-
-    <View style="@style/PopupMenuDivider" />
-
-    <TextView android:text="@string/menu_settings" style="@style/PopupMenuSectionLabel" />
-    <TextView android:id="@+id/menu_item_editor_settings" android:text="@string/menu_editor_settings" style="@style/PopupMenuItem" />
 
 </LinearLayout>

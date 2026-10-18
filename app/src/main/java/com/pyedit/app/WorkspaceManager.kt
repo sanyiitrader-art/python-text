@@ -3,6 +3,7 @@ package com.pyedit.app
 import android.content.Context
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
+import java.io.IOException
 import java.security.MessageDigest
 
 class WorkspaceManager(private val context: Context) {
@@ -28,8 +29,6 @@ class WorkspaceManager(private val context: Context) {
         return buildTreeFrom(root)
     }
 
-    /** Lists folders that contain at least one supported file, plus the
-     * supported files themselves (the one centralized filter: Languages). */
     private fun buildTreeFrom(dir: DocumentFile): List<FileNode> {
         val children = dir.listFiles()
         return children
@@ -53,7 +52,6 @@ class WorkspaceManager(private val context: Context) {
             )
     }
 
-    /** True if the tree contains any supported file (name kept for callers). */
     fun hasAnyPythonFile(nodes: List<FileNode>): Boolean = nodes.any { node ->
         when (node) {
             is FileNode.Leaf -> true
@@ -71,10 +69,15 @@ class WorkspaceManager(private val context: Context) {
         return ""
     }
 
+    /**
+     * Throws if the file can't be opened or written. (It used to do nothing
+     * when the provider returned no stream, which made failed saves look
+     * successful.)
+     */
     fun saveFile(doc: DocumentFile, content: String) {
-        context.contentResolver.openOutputStream(doc.uri, "wt")?.use { output ->
-            output.write(content.toByteArray())
-        }
+        val out = context.contentResolver.openOutputStream(doc.uri, "wt")
+            ?: throw IOException("Couldn't open ${doc.name ?: "the file"} for writing")
+        out.use { it.write(content.toByteArray()) }
     }
 
     private fun withSupportedExtension(name: String) =
@@ -83,7 +86,6 @@ class WorkspaceManager(private val context: Context) {
     fun createNewFileInTree(rootUri: Uri, name: String): DocumentFile? {
         val root = DocumentFile.fromTreeUri(context, rootUri) ?: return null
         val fileName = withSupportedExtension(name)
-        // A generic MIME type stops providers from appending their own extension.
         val mime = if (fileName.endsWith(".py")) "text/x-python" else "application/octet-stream"
         return root.findFile(fileName) ?: root.createFile(mime, fileName)
     }

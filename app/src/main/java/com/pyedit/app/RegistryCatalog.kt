@@ -18,6 +18,9 @@ object RegistryCatalog {
     private const val RUBY_NOTE =
         "Browse only: there is no Ruby runtime on this device, so gems can't be installed."
 
+    /** RubyGems search syntax: only gems with more than 300 million downloads. */
+    private const val RUBY_DEFAULT_QUERY = "downloads:>300000000"
+
     /** source: "npm", "npm-ts" or "gems". */
     suspend fun search(source: String, query: String): List<PackageInfo> = withContext(Dispatchers.IO) {
         when (source) {
@@ -30,7 +33,7 @@ object RegistryCatalog {
 
     private fun npm(query: String, keyword: String?): List<PackageInfo> {
         var text = listOfNotNull(query.trim().ifEmpty { null }, keyword?.let { "keywords:$it" }).joinToString(" ")
-        if (text.isEmpty()) text = "keywords:framework" // default view: popular frameworks
+        if (text.isEmpty()) text = "keywords:framework"
         val url = "https://registry.npmjs.org/-/v1/search?size=25&text=" + URLEncoder.encode(text, "UTF-8")
         val objects = JSONObject(get(url)).getJSONArray("objects")
         val out = ArrayList<PackageInfo>()
@@ -41,9 +44,9 @@ object RegistryCatalog {
         return out
     }
 
+    /** An empty search shows the most-downloaded gems instead of an empty list. */
     private fun gems(query: String): List<PackageInfo> {
-        val q = query.trim()
-        if (q.isEmpty()) return emptyList()
+        val q = query.trim().ifEmpty { RUBY_DEFAULT_QUERY }
         val url = "https://rubygems.org/api/v1/search.json?query=" + URLEncoder.encode(q, "UTF-8")
         val arr = JSONArray(get(url))
         val out = ArrayList<PackageInfo>()

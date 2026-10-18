@@ -261,19 +261,12 @@ class DownloadLibraryActivity : AppCompatActivity() {
         render()
     }
 
+    /** npm, TypeScript (npm) and RubyGems. An empty search shows a default
+     * list for every registry tab, including Ruby. */
     private fun runRegistrySearch() {
         val source = registryTabs[selectedTab] ?: return
         registryJob?.cancel()
         val q = binding.editSearch.text.toString().trim()
-
-        if (source == "gems" && q.isEmpty()) {
-            results = emptyList()
-            registryError = null
-            registryLoading = false
-            adapter.submit(results)
-            render()
-            return
-        }
 
         registryLoading = true
         registryError = null
@@ -328,7 +321,6 @@ class DownloadLibraryActivity : AppCompatActivity() {
                     status("Couldn't load packages\n$registryError")
                     b.tvRetry.visibility = View.VISIBLE
                 }
-                selectedTab == 4 && binding.editSearch.text.isNullOrBlank() -> status("Type to search RubyGems")
                 results.isEmpty() -> status("No packages found")
                 else -> b.rvPackages.visibility = View.VISIBLE
             }

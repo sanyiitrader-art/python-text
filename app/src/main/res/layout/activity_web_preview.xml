@@ -1,5 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- app/src/main/res/layout/activity_web_preview.xml -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
@@ -36,29 +35,26 @@
 
     </LinearLayout>
 
-    <WebView
-        android:id="@+id/web_view"
+    <!-- The page gets all the remaining height; notifications float on top of it. -->
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1" />
+        android:layout_weight="1">
 
-    <!-- Hidden until the page logs something or throws -->
-    <ScrollView
-        android:id="@+id/console_scroll"
-        android:layout_width="match_parent"
-        android:layout_height="140dp"
-        android:background="@color/output_background"
-        android:padding="8dp"
-        android:visibility="gone">
+        <WebView
+            android:id="@+id/web_view"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
 
-        <TextView
-            android:id="@+id/tv_console"
+        <LinearLayout
+            android:id="@+id/notifications"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:fontFamily="monospace"
-            android:textSize="12sp"
-            android:textIsSelectable="true" />
+            android:layout_gravity="top"
+            android:layout_margin="12dp"
+            android:orientation="vertical"
+            android:clipChildren="false" />
 
-    </ScrollView>
+    </FrameLayout>
 
 </LinearLayout>

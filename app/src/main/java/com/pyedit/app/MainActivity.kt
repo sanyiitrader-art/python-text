@@ -91,6 +91,10 @@ class MainActivity : AppCompatActivity() {
             launchOpenFile = { openFileLauncher.launch(arrayOf("*/*")) }
         )
 
+        // Syntax highlighting follows whatever text was just loaded: the open
+        // file's extension, or the active HTML/CSS/JS tab in a web project.
+        editorController.onTextLoaded = { updateHighlight() }
+
         executionUiController = ExecutionUiController(
             activity = this,
             binding = binding,
@@ -120,6 +124,12 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             fileController.init()
         }
+    }
+
+    private fun updateHighlight() {
+        val ext = if (webProjectController.active) webProjectController.currentExt()
+        else Languages.extensionOf(fileController.getDisplayFileName())
+        editorController.setHighlightExt(ext)
     }
 
     override fun onPause() {

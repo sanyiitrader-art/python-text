@@ -31,6 +31,10 @@ class EditorController(
     private var errorHighlightActive = false
     private var isKeyboardVisible = false
 
+    /** Called after every loadText(); MainActivity uses it to pick the highlighter. */
+    var onTextLoaded: (() -> Unit)? = null
+    private var highlightExt: String? = "?" // sentinel so the first call always applies
+
     fun setup() {
         editor = CodeEditor(activity)
         editor.layoutParams = FrameLayout.LayoutParams(
@@ -40,6 +44,10 @@ class EditorController(
         binding.editorContainer.addView(editor)
         editor.isWordwrap = false
 
+        // Line numbers stay fixed on the left while the code scrolls sideways
+        // (CodeEditor.setPinLineNumber exists in sora-editor 0.24.3).
+        try { editor.setPinLineNumber(true) } catch (t: Throwable) { /* best-effort */ }
+
         try {
             PythonLanguage.attach(activity, editor)
         } catch (t: Throwable) {
@@ -48,11 +56,6 @@ class EditorController(
 
         attachContentBehaviors()
 
-        // FIX item 3: this listener used to call hideKeyboard() on every
-        // ACTION_DOWN, so tapping the typing area while the keyboard was
-        // already up closed it. Tapping the editor must never dismiss
-        // the keyboard — outside-tap dismissal is handled by
-        // MainActivity for areas that are NOT the editor.
         editor.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
                 clearErrorHighlightIfActive()
@@ -65,6 +68,17 @@ class EditorController(
         applyVisualPolish()
         setupPythonToolbar()
         setupKeyboardAwareToolbar()
+    }
+
+    /** Switches syntax highlighting. ext = file extension ("py", "css", ...), null = none. */
+    fun setHighlightExt(ext: String?) {
+        if (ext == highlightExt) return
+        highlightExt = ext
+        try {
+            editor.setEditorLanguage(ext?.let { SyntaxHighlighting.languageFor(it) })
+        } catch (t: Throwable) {
+            onError("Highlighting failed", t)
+        }
     }
 
     fun requestFocusAndShowKeyboard() {
@@ -86,6 +100,7 @@ class EditorController(
         editor.setText(content)
         attachContentBehaviors()
         suppressContentCallback = false
+        onTextLoaded?.invoke()
     }
 
     fun replaceAllText(newText: String) {

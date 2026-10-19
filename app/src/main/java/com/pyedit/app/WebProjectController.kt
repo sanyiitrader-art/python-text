@@ -44,6 +44,9 @@ class WebProjectController(
 
     private fun dp(v: Int) = (v * activity.resources.displayMetrics.density).toInt()
 
+    /** Extension of the tab being edited ("html", "css" or "js") - drives syntax highlighting. */
+    fun currentExt(): String = exts[current]
+
     /** Wraps the editor in [tab bar + editor]. Call once, after editorController.setup(). */
     fun setup() {
         val editor = editorController.editor

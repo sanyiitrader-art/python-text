@@ -9,12 +9,15 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
-/** Real search results from official registries. Browse only: nothing here installs. */
+/**
+ * Real search results from official registries. npm results are installable
+ * (see NpmInstaller); RubyGems results stay browse-only (no Ruby runtime).
+ */
 object RegistryCatalog {
 
     private const val UA = "PyEdit-Android/1.0 (package browser)"
-    private const val JS_NOTE =
-        "Browse only: the JavaScript engine has no module loader, so npm packages can't be installed."
+    private const val NPM_NOTE =
+        "Installs as CommonJS source for the script engine. Packages that need Node.js APIs or a browser may not run."
     private const val RUBY_NOTE =
         "Browse only: there is no Ruby runtime on this device, so gems can't be installed."
 
@@ -39,12 +42,11 @@ object RegistryCatalog {
         val out = ArrayList<PackageInfo>()
         for (i in 0 until objects.length()) {
             val p = objects.getJSONObject(i).getJSONObject("package")
-            out.add(browseOnly(p.getString("name"), p.optString("version"), p.optString("description"), JS_NOTE))
+            out.add(entry(p.getString("name"), p.optString("version"), p.optString("description"), NPM_NOTE, true))
         }
         return out
     }
 
-    /** An empty search shows the most-downloaded gems instead of an empty list. */
     private fun gems(query: String): List<PackageInfo> {
         val q = query.trim().ifEmpty { RUBY_DEFAULT_QUERY }
         val url = "https://rubygems.org/api/v1/search.json?query=" + URLEncoder.encode(q, "UTF-8")
@@ -52,20 +54,20 @@ object RegistryCatalog {
         val out = ArrayList<PackageInfo>()
         for (i in 0 until minOf(arr.length(), 25)) {
             val g = arr.getJSONObject(i)
-            out.add(browseOnly(g.getString("name"), g.optString("version"), g.optString("info"), RUBY_NOTE))
+            out.add(entry(g.getString("name"), g.optString("version"), g.optString("info"), RUBY_NOTE, false))
         }
         return out
     }
 
-    private fun browseOnly(name: String, version: String, summary: String, note: String) =
+    private fun entry(name: String, version: String, summary: String, note: String, installable: Boolean) =
         PackageInfo(
             name = name,
             version = version,
             summary = summary.trim(),
-            compat = Compat.UNKNOWN,
+            compat = Compat.UNKNOWN, // runtime compatibility is only known when the package is used
             reason = note,
             nativeBuild = false,
-            installSupported = false
+            installSupported = installable
         )
 
     private fun get(url: String): String {

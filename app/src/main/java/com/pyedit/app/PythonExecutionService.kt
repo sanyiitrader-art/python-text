@@ -79,9 +79,11 @@ class PythonExecutionService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        // Must be set before anything reads them.
         try {
             Os.setenv("PYEDIT_SITE_PACKAGES", File(filesDir, "site-packages").absolutePath, true)
-        } catch (t: Throwable) { /* packages just won't be importable */ }
+            Os.setenv("PYEDIT_NODE_MODULES", File(filesDir, "node_modules").absolutePath, true)
+        } catch (t: Throwable) { /* installed packages just won't be importable */ }
 
         if (!Python.isStarted()) {
             Python.start(AndroidPlatform(this))

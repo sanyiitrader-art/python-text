@@ -34,7 +34,7 @@ class DownloadLibraryActivity : AppCompatActivity() {
     private val tabViews = mutableListOf<TextView>()
     private var selectedTab = 0
 
-    // tab index -> registry source (browse-only catalogs)
+    // tab index -> registry source (npm tabs install; Ruby is browse-only)
     private val registryTabs = mapOf(1 to "npm", 2 to "npm-ts", 4 to "gems")
 
     // --- Python catalog state ---
@@ -46,6 +46,7 @@ class DownloadLibraryActivity : AppCompatActivity() {
     private var lookupJob: Job? = null
 
     private var installedVersions: Map<String, String> = emptyMap()
+    private var npmInstalled: Map<String, String> = emptyMap()
     private val installing = mutableSetOf<String>()
     private val infoRequested = mutableSetOf<String>()
     private val infoFailed = mutableSetOf<String>()
@@ -77,6 +78,12 @@ class DownloadLibraryActivity : AppCompatActivity() {
         loadNames()
         selectTab(0)
     }
+
+    private fun isNpmTab() = selectedTab == 1 || selectedTab == 2
+
+    /** Python and npm installs are tracked separately (different environments). */
+    private fun installKey(name: String): String =
+        (if (selectedTab == 0) "py:" else "npm:") + PackageCatalog.normalize(name)
 
     // --- tabs -----------------------------------------------------------
 
@@ -121,8 +128,15 @@ class DownloadLibraryActivity : AppCompatActivity() {
                 else registryInfo[PackageCatalog.normalize(it)]
             },
             infoFailed = { selectedTab == 0 && infoFailed.contains(PackageCatalog.normalize(it)) },
-            installedVersion = { if (selectedTab == 0) installedVersions[PackageCatalog.normalize(it)] else null },
-            isInstalling = { selectedTab == 0 && installing.contains(PackageCatalog.normalize(it)) },
+            installedVersion = {
+                val key = PackageCatalog.normalize(it)
+                when {
+                    selectedTab == 0 -> installedVersions[key]
+                    isNpmTab() -> npmInstalled[key]
+                    else -> null
+                }
+            },
+            isInstalling = { installing.contains(installKey(it)) },
             onNeedInfo = { requestInfo(it) },
             onInstall = { install(it) }
         )
@@ -261,8 +275,6 @@ class DownloadLibraryActivity : AppCompatActivity() {
         render()
     }
 
-    /** npm, TypeScript (npm) and RubyGems. An empty search shows a default
-     * list for every registry tab, including Ruby. */
     private fun runRegistrySearch() {
         val source = registryTabs[selectedTab] ?: return
         registryJob?.cancel()
@@ -328,22 +340,45 @@ class DownloadLibraryActivity : AppCompatActivity() {
         }
     }
 
-    // --- install (Python only) ------------------------------------------
+    // --- install ----------------------------------------------------------
 
     private fun refreshInstalled() {
         lifecycleScope.launch {
             try {
                 installedVersions = withContext(Dispatchers.IO) { installer.installedVersions() }
-                adapter.notifyDataSetChanged()
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: Exception) { /* leave the map empty */ }
+            } catch (e: Exception) { /* leave the map as it was */ }
+            try {
+                npmInstalled = withContext(Dispatchers.IO) { NpmInstaller.installedVersions(applicationContext) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) { /* leave the map as it was */ }
+            adapter.notifyDataSetChanged()
         }
     }
 
     private fun install(name: String) {
-        if (selectedTab != 0) return
-        val key = PackageCatalog.normalize(name)
+        when {
+            selectedTab == 0 -> installPython(name)
+            isNpmTab() -> installNpm(name)
+        }
+    }
+
+    private fun showResult(ok: Boolean, message: String) {
+        if (ok) {
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+        } else {
+            AlertDialog.Builder(this)
+                .setTitle("Install failed")
+                .setMessage(message)
+                .setPositiveButton("OK", null)
+                .show()
+        }
+    }
+
+    private fun installPython(name: String) {
+        val key = installKey(name)
         if (!installing.add(key)) return
         adapter.refresh(name)
 
@@ -356,15 +391,24 @@ class DownloadLibraryActivity : AppCompatActivity() {
             } catch (e: Exception) { /* keep previous map */ }
             installing.remove(key)
             adapter.refresh(name)
+            showResult(result.ok, result.message)
+        }
+    }
 
-            if (result.ok) {
-                Toast.makeText(this@DownloadLibraryActivity, result.message, Toast.LENGTH_LONG).show()
-            } else {
-                AlertDialog.Builder(this@DownloadLibraryActivity)
-                    .setTitle("Install failed")
-                    .setMessage(result.message)
-                    .setPositiveButton("OK", null)
-                    .show()
+    /** Leaving this screen cancels the install; staging is cleaned up, nothing is left half-installed. */
+    private fun installNpm(name: String) {
+        val key = installKey(name)
+        if (!installing.add(key)) return
+        adapter.refresh(name)
+
+        lifecycleScope.launch {
+            try {
+                val result = NpmInstaller.install(applicationContext, name)
+                npmInstalled = withContext(Dispatchers.IO) { NpmInstaller.installedVersions(applicationContext) }
+                showResult(result.ok, result.message)
+            } finally {
+                installing.remove(key)
+                adapter.refresh(name)
             }
         }
     }

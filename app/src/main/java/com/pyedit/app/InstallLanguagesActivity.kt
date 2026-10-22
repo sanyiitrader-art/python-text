@@ -17,17 +17,20 @@ import java.util.Locale
 
 class InstallLanguagesActivity : AppCompatActivity() {
 
-    private enum class Kind { EXISTING, INCLUDED, TYPESCRIPT, UNAVAILABLE }
+    private enum class Kind { EXISTING, INCLUDED, TYPESCRIPT, WASM }
 
-    private data class Row(val title: String, val badge: String, val kind: Kind, val info: String)
+    private data class Row(
+        val title: String, val badge: String, val kind: Kind, val info: String,
+        val wasm: WasmRuntimes.Id? = null
+    )
 
     // Provisional order (lower -> higher typical overhead), not a benchmark.
     private val rows = listOf(
         Row("Lua", "Lua", Kind.INCLUDED, "Included \u00B7 LuaJ 3.0.1 (Lua 5.2 dialect)"),
-        Row("JavaScript", "JS", Kind.INCLUDED, "Included \u00B7 QuickJS (ES2020, no Node APIs, no ES modules)"),
+        Row("JavaScript", "JS", Kind.INCLUDED, "Included \u00B7 QuickJS (ES2020, CommonJS require, no Node APIs)"),
         Row("Python", "Py", Kind.EXISTING, "Already available \u00B7 CPython 3.11 (existing runtime)"),
-        Row("PHP", "PHP", Kind.UNAVAILABLE, "Unavailable \u00B7 no Android PHP runtime can be run from app storage"),
-        Row("Ruby", "Rb", Kind.UNAVAILABLE, "Unavailable \u00B7 no Android Ruby runtime can be run from app storage"),
+        Row("PHP", "PHP", Kind.WASM, "PHP 8.4 (php-wasm ${WasmRuntimes.Id.PHP.version}, WebAssembly) \u00B7 no stdin", WasmRuntimes.Id.PHP),
+        Row("Ruby", "Rb", Kind.WASM, "Ruby 3.3 (ruby.wasm ${WasmRuntimes.Id.RUBY.version}, WebAssembly) \u00B7 no stdin, no native gems", WasmRuntimes.Id.RUBY),
         Row("TypeScript", "TS", Kind.TYPESCRIPT, "TypeScript ${RuntimeInstaller.TS_VERSION} compiler \u00B7 runs on QuickJS"),
         Row("Web", "</>", Kind.INCLUDED, "Included \u00B7 Android WebView preview for HTML/CSS/JS")
     )
@@ -47,11 +50,17 @@ class InstallLanguagesActivity : AppCompatActivity() {
 
         RuntimeInstaller.init(applicationContext)
         RuntimeInstaller.prefetchSizes()
+        WasmRuntimes.init(applicationContext)
+        WasmRuntimes.prefetchSizes()
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                launch { RuntimeInstaller.tsState.collect { adapter.refreshTypeScript() } }
-                launch { RuntimeInstaller.tsSizes.collect { adapter.refreshTypeScript() } }
+                launch { RuntimeInstaller.tsState.collect { adapter.refreshWhere { it.kind == Kind.TYPESCRIPT } } }
+                launch { RuntimeInstaller.tsSizes.collect { adapter.refreshWhere { it.kind == Kind.TYPESCRIPT } } }
+                for (id in WasmRuntimes.Id.values()) {
+                    launch { WasmRuntimes.state(id).collect { adapter.refreshWhere { it.wasm == id } } }
+                    launch { WasmRuntimes.sizes(id).collect { adapter.refreshWhere { it.wasm == id } } }
+                }
             }
         }
     }
@@ -65,8 +74,8 @@ class InstallLanguagesActivity : AppCompatActivity() {
             var pulse: ObjectAnimator? = null
         }
 
-        fun refreshTypeScript() {
-            val idx = rows.indexOfFirst { it.kind == Kind.TYPESCRIPT }
+        fun refreshWhere(pred: (Row) -> Boolean) {
+            val idx = rows.indexOfFirst(pred)
             if (idx >= 0) notifyItemChanged(idx)
         }
 
@@ -86,53 +95,59 @@ class InstallLanguagesActivity : AppCompatActivity() {
             b.tvBadge.text = r.badge
             b.btnAction.setOnClickListener(null)
 
-            fun determinate(p: Int) {
-                b.ring.isIndeterminate = false
-                b.ring.setProgressCompat(p, true)
-            }
-            fun button(label: String, enabled: Boolean) {
-                b.btnAction.text = label
-                b.btnAction.isEnabled = enabled
-                b.btnAction.alpha = if (enabled) 1f else 0.5f
-            }
-
             when (r.kind) {
-                Kind.EXISTING -> { determinate(100); b.tvInfo.text = r.info; button("Available", false) }
-                Kind.INCLUDED -> { determinate(100); b.tvInfo.text = r.info; button("Included", false) }
-                Kind.UNAVAILABLE -> { determinate(0); b.tvInfo.text = r.info; button("Unavailable", false) }
-                Kind.TYPESCRIPT -> bindTypeScript(h, r)
+                Kind.EXISTING -> { done(h); b.tvInfo.text = r.info; button(h, "Available", false) }
+                Kind.INCLUDED -> { done(h); b.tvInfo.text = r.info; button(h, "Included", false) }
+                Kind.TYPESCRIPT -> bindInstallable(
+                    h, r, RuntimeInstaller.tsState.value, RuntimeInstaller.tsSizes.value,
+                    { RuntimeInstaller.installTypeScript(applicationContext) },
+                    { RuntimeInstaller.cancelDownload() }
+                )
+                Kind.WASM -> {
+                    val id = r.wasm!!
+                    bindInstallable(
+                        h, r, WasmRuntimes.state(id).value, WasmRuntimes.sizes(id).value,
+                        { WasmRuntimes.install(applicationContext, id) },
+                        { WasmRuntimes.cancel(id) }
+                    )
+                }
             }
         }
 
-        private fun bindTypeScript(h: VH, r: Row) {
-            val b = h.b
-            val sizes = RuntimeInstaller.tsSizes.value
-            fun determinate(p: Int) { b.ring.isIndeterminate = false; b.ring.setProgressCompat(p, true) }
-            fun button(label: String, enabled: Boolean) {
-                b.btnAction.text = label
-                b.btnAction.isEnabled = enabled
-                b.btnAction.alpha = if (enabled) 1f else 0.5f
-            }
+        private fun done(h: VH) { h.b.ring.isIndeterminate = false; h.b.ring.setProgressCompat(100, true) }
 
-            when (val s = RuntimeInstaller.tsState.value) {
+        private fun button(h: VH, label: String, enabled: Boolean) {
+            h.b.btnAction.text = label
+            h.b.btnAction.isEnabled = enabled
+            h.b.btnAction.alpha = if (enabled) 1f else 0.5f
+        }
+
+        private fun determinate(h: VH, p: Int) { h.b.ring.isIndeterminate = false; h.b.ring.setProgressCompat(p, true) }
+
+        private fun bindInstallable(
+            h: VH, r: Row, st: RuntimeInstaller.State, sz: RuntimeInstaller.Sizes,
+            install: () -> Unit, cancel: () -> Unit
+        ) {
+            val b = h.b
+            when (st) {
                 is RuntimeInstaller.State.NotInstalled, is RuntimeInstaller.State.Cancelled -> {
-                    determinate(0)
-                    val prefix = if (s is RuntimeInstaller.State.Cancelled) "Cancelled \u00B7 " else ""
-                    b.tvInfo.text = "$prefix${r.info}\nDownload ${formatSize(sizes.download)} \u00B7 Installed ${formatSize(sizes.installed)}"
-                    button("Install", true)
-                    b.btnAction.setOnClickListener { RuntimeInstaller.installTypeScript(applicationContext) }
+                    determinate(h, 0)
+                    val prefix = if (st is RuntimeInstaller.State.Cancelled) "Cancelled \u00B7 " else ""
+                    b.tvInfo.text = "$prefix${r.info}\nDownload ${formatSize(sz.download)} \u00B7 Installed ${formatSize(sz.installed)}"
+                    button(h, "Install", true)
+                    b.btnAction.setOnClickListener { install() }
                 }
                 is RuntimeInstaller.State.Downloading -> {
-                    if (s.total > 0) {
-                        val pct = (s.done * 100 / s.total).toInt()
-                        determinate(pct)
+                    if (st.total > 0) {
+                        val pct = (st.done * 100 / st.total).toInt()
+                        determinate(h, pct)
                         b.tvInfo.text = "Downloading $pct%"
                     } else {
-                        b.ring.isIndeterminate = true // no reliable total -> no fake percentage
+                        b.ring.isIndeterminate = true
                         b.tvInfo.text = "Downloading\u2026"
                     }
-                    button("Cancel", true)
-                    b.btnAction.setOnClickListener { RuntimeInstaller.cancelDownload() }
+                    button(h, "Cancel", true)
+                    b.btnAction.setOnClickListener { cancel() }
                 }
                 is RuntimeInstaller.State.Installing -> {
                     b.ring.isIndeterminate = true
@@ -143,20 +158,20 @@ class InstallLanguagesActivity : AppCompatActivity() {
                         repeatMode = ObjectAnimator.REVERSE
                         start()
                     }
-                    button("Installing\u2026", false) // not cancellable: it finishes or rolls back
+                    button(h, "Installing\u2026", false)
                 }
                 is RuntimeInstaller.State.Installed -> {
-                    determinate(100)
-                    b.tvInfo.text = "\u2713 Installed \u00B7 TypeScript ${s.version}"
+                    determinate(h, 100)
+                    b.tvInfo.text = "\u2713 Installed \u00B7 ${r.title} ${st.version}"
                     b.tvInfo.setTextColor(getColor(R.color.success_color))
-                    button("Installed", false)
+                    button(h, "Installed", false)
                 }
                 is RuntimeInstaller.State.Failed -> {
-                    determinate(0)
-                    b.tvInfo.text = "Failed: ${s.message}"
+                    determinate(h, 0)
+                    b.tvInfo.text = "Failed: ${st.message}"
                     b.tvInfo.setTextColor(getColor(R.color.error_color))
-                    button("Retry", true)
-                    b.btnAction.setOnClickListener { RuntimeInstaller.installTypeScript(applicationContext) }
+                    button(h, "Retry", true)
+                    b.btnAction.setOnClickListener { install() }
                 }
             }
         }

@@ -2,6 +2,7 @@ package com.pyedit.app
 
 import android.content.Context
 import android.graphics.Rect
+import android.graphics.Typeface
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -31,9 +32,8 @@ class EditorController(
     private var errorHighlightActive = false
     private var isKeyboardVisible = false
 
-    /** Called after every loadText(); MainActivity uses it to pick the highlighter. */
     var onTextLoaded: (() -> Unit)? = null
-    private var highlightExt: String? = "?" // sentinel so the first call always applies
+    private var highlightExt: String? = "?"
 
     fun setup() {
         editor = CodeEditor(activity)
@@ -44,9 +44,8 @@ class EditorController(
         binding.editorContainer.addView(editor)
         editor.isWordwrap = false
 
-        // Line numbers stay fixed on the left while the code scrolls sideways
-        // (CodeEditor.setPinLineNumber exists in sora-editor 0.24.3).
         try { editor.setPinLineNumber(true) } catch (t: Throwable) { /* best-effort */ }
+        applyGutterStyle()
 
         try {
             PythonLanguage.attach(activity, editor)
@@ -70,7 +69,22 @@ class EditorController(
         setupKeyboardAwareToolbar()
     }
 
-    /** Switches syntax highlighting. ext = file extension ("py", "css", ...), null = none. */
+    /**
+     * Line-number bar: bold digits, a little padding either side of them, and a thin divider.
+     * Tweak the four numbers below to make it narrower/wider.
+     */
+    private fun applyGutterStyle() {
+        val d = activity.resources.displayMetrics.density
+        try {
+            editor.setTypefaceLineNumber(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD))
+            editor.setLineNumberMarginLeft(4f * d)
+            editor.setDividerMargin(6f * d, 8f * d)
+            editor.setDividerWidth(1f * d)
+        } catch (t: Throwable) {
+            onError("Line number styling failed", t)
+        }
+    }
+
     fun setHighlightExt(ext: String?) {
         if (ext == highlightExt) return
         highlightExt = ext

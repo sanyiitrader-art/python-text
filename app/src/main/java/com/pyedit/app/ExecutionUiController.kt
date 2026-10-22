@@ -43,14 +43,16 @@ class ExecutionUiController(
     private data class Decision(val browser: Boolean, val why: String?)
 
     private val prefs = activity.getSharedPreferences("pyedit_run", Context.MODE_PRIVATE)
+    private val wasm = WasmRunner(activity)
+    private val wasmTail = StringBuilder()
 
     private val maxOutputChars = 200_000
     private val trimToChars = 150_000
 
     private var runStartNanos = 0L
     private var hadError = false
-    private var runToken = 0              // invalidates an in-flight TypeScript transpile on Stop
-    private var lastRunTranspiled = false // compiled-JS line numbers aren't editor lines
+    private var runToken = 0
+    private var lastRunTranspiled = false
 
     private val browserNotDefined = Regex(
         "\\b(document|window|navigator|localStorage|sessionStorage|alert|setTimeout|setInterval|fetch)\\b is not defined"
@@ -113,8 +115,9 @@ class ExecutionUiController(
 
     fun onRunStopClicked() {
         if (isRunning) {
-            runToken++ // cancels a pending TypeScript transpile too
+            runToken++
             executionController.stop()
+            wasm.stop()
             isRunning = false
             onRunStateChanged(false)
             setStdinActive(false)
@@ -137,20 +140,14 @@ class ExecutionUiController(
                     )
                 }
             }
+            Lang.RUBY -> runWasm(name, WasmRuntimes.Id.RUBY)
+            Lang.PHP -> runWasm(name, WasmRuntimes.Id.PHP)
             Lang.WEB -> launchWebPreview(name)
             Lang.CSS -> Toast.makeText(
                 activity,
                 "A .css file is a stylesheet, not a program. Open the HTML file that uses it and press Run.",
                 Toast.LENGTH_LONG
             ).show()
-            Lang.RUBY -> showMissingRuntime(
-                "Ruby isn't available",
-                "No Ruby runtime that can run on Android from app storage is available, so .rb files can't be run."
-            )
-            Lang.PHP -> showMissingRuntime(
-                "PHP isn't available",
-                "No PHP runtime that can run on Android from app storage is available, so .php files can't be run."
-            )
             null -> Toast.makeText(activity, "This file type can't be run or previewed.", Toast.LENGTH_LONG).show()
         }
     }
@@ -172,6 +169,46 @@ class ExecutionUiController(
         executionController.run(getScriptText(), name, language, compilerPath, buildListener())
     }
 
+    /** Ruby / PHP: WebAssembly in a hidden WebView. No stdin. */
+    private fun runWasm(name: String, id: WasmRuntimes.Id) {
+        if (!WasmRuntimes.isUsable(activity, id)) {
+            showMissingRuntime(
+                "${id.label} isn't installed",
+                "Running ${if (id == WasmRuntimes.Id.RUBY) ".rb" else ".php"} files needs the ${id.label} runtime. Your file is untouched."
+            )
+            return
+        }
+        lastRunTranspiled = false
+        wasmTail.setLength(0)
+        beginRun("$ ${id.dir} $name")
+        wasm.run(id, getScriptText(), object : WasmRunner.Listener {
+            override fun onOutput(stream: Int, text: String) {
+                appendOutput(text)
+                wasmTail.append(text)
+                if (wasmTail.length > 8000) wasmTail.delete(0, wasmTail.length - 4000)
+            }
+
+            override fun onDone(ok: Boolean, message: String) {
+                if (!isRunning) return
+                if (!ok) {
+                    hadError = true
+                    val line = if (id == WasmRuntimes.Id.RUBY)
+                        Regex(":(\\d+):in").find(message)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                    else
+                        Regex("(?:Parse error|Fatal error)[^\\n]*? on line (\\d+)").find(wasmTail)
+                            ?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                    appendErrorSummary(
+                        line, if (id == WasmRuntimes.Id.RUBY) "RubyError" else "PHPError",
+                        message.ifBlank { "Execution failed" }
+                    )
+                }
+                isRunning = false
+                onRunStateChanged(false)
+                appendFinishLine()
+            }
+        })
+    }
+
     private fun runJavaScript(name: String) {
         val code = getScriptText()
         val d = decide(code)
@@ -187,7 +224,6 @@ class ExecutionUiController(
         }
     }
 
-    /** Transpile (no type-check) off the UI thread, then pick the engine on the result. */
     private fun runTypeScript(name: String) {
         val text = getScriptText()
         val token = ++runToken
@@ -197,7 +233,7 @@ class ExecutionUiController(
         Thread(null, {
             val result = try { TsTranspiler.transpile(compiler, text, name) } catch (t: Throwable) { null }
             activity.runOnUiThread {
-                if (token != runToken) return@runOnUiThread // stopped meanwhile
+                if (token != runToken) return@runOnUiThread
                 val js = result?.js
                 if (js == null) {
                     val first = result?.errors?.firstOrNull()
@@ -222,10 +258,8 @@ class ExecutionUiController(
         }, "ts-transpile", 32L * 1024 * 1024).start()
     }
 
-    /** The script becomes the only <script> of a generated page (same first line, so
-     * console line numbers match the code). Console output shows on the preview screen. */
     private fun openInBrowser(name: String, code: String, why: String?) {
-        appendOutput("Opened in the browser preview (${why ?: "browser mode"}). Console output is shown at the bottom of that screen.\n")
+        appendOutput("Opened in the browser preview (${why ?: "browser mode"}). Console output is shown as notifications on that screen.\n")
         val safe = code.replace(Regex("</script", RegexOption.IGNORE_CASE), "<\\\\/script")
         WebPreviewHolder.html =
             "<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head><body><script>$safe\n</script></body></html>"
@@ -275,12 +309,10 @@ class ExecutionUiController(
         override fun onError(line: Int, errorType: String, message: String) = activity.runOnUiThread {
             hadError = true
             if (lastRunTranspiled && line > 0) {
-                // line refers to the compiled JS, not the .ts file: don't jump the editor
                 appendErrorSummary(0, errorType, "$message (compiled JS line $line)")
             } else {
                 appendErrorSummary(line, errorType, message)
             }
-            // Never retry silently in another engine - just explain and point to the override.
             if (browserNotDefined.containsMatchIn(message)) {
                 appendStatusLine(
                     "\u2139 This code needs a browser. Long-press Run to switch the mode to Browser.",

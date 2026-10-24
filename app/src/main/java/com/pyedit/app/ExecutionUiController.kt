@@ -3,6 +3,8 @@ package com.pyedit.app
 import android.content.Context
 import android.content.Intent
 import android.graphics.Typeface
+import android.os.Handler
+import android.os.Looper
 import android.text.Spannable
 import android.text.SpannableString
 import android.text.method.LinkMovementMethod
@@ -19,6 +21,7 @@ import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import com.pyedit.app.databinding.ActivityMainBinding
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 
 class ExecutionUiController(
     private val activity: AppCompatActivity,
@@ -45,9 +48,18 @@ class ExecutionUiController(
     private val prefs = activity.getSharedPreferences("pyedit_run", Context.MODE_PRIVATE)
     private val wasm = WasmRunner(activity)
     private val wasmTail = StringBuilder()
+    private val handler = Handler(Looper.getMainLooper())
+
+    private var heartbeat: Runnable? = null
+    private var watchdog: Runnable? = null
+    private var outputCount = 0
+    private var lastStage = "starting"
+    private var wasmReady = false
 
     private val maxOutputChars = 200_000
     private val trimToChars = 150_000
+
+    private val startupTimeoutMs = 150_000L
 
     private var runStartNanos = 0L
     private var hadError = false
@@ -111,6 +123,47 @@ class ExecutionUiController(
         JsMode.AUTO -> JsEnvDetector.detect(code).let { Decision(it.browser, it.reason) }
     }
 
+    // --- heartbeat / watchdog ------------------------------------------------
+
+    private fun startHeartbeat(label: String) {
+        stopTimers()
+        val t0 = System.nanoTime()
+        val countAtStart = outputCount
+        val r = object : Runnable {
+            override fun run() {
+                if (!isRunning) return
+                if (outputCount == countAtStart) {
+                    val s = ((System.nanoTime() - t0) / 1_000_000_000L).toInt()
+                    appendStatusLine("\u2026 still working: $label ($s s)", R.color.accent_grey)
+                }
+                handler.postDelayed(this, 8000)
+            }
+        }
+        heartbeat = r
+        handler.postDelayed(r, 8000)
+    }
+
+    private fun startWatchdog(action: () -> Unit) {
+        watchdog?.let { handler.removeCallbacks(it) }
+        val w = Runnable { if (isRunning) action() }
+        watchdog = w
+        handler.postDelayed(w, startupTimeoutMs)
+    }
+
+    private fun stopTimers() {
+        heartbeat?.let { handler.removeCallbacks(it) }
+        watchdog?.let { handler.removeCallbacks(it) }
+        heartbeat = null
+        watchdog = null
+    }
+
+    private fun finishRun() {
+        isRunning = false
+        onRunStateChanged(false)
+        setStdinActive(false)
+        appendFinishLine()
+    }
+
     // --- Run ---------------------------------------------------------------
 
     fun onRunStopClicked() {
@@ -118,6 +171,7 @@ class ExecutionUiController(
             runToken++
             executionController.stop()
             wasm.stop()
+            stopTimers()
             isRunning = false
             onRunStateChanged(false)
             setStdinActive(false)
@@ -153,10 +207,12 @@ class ExecutionUiController(
     }
 
     private fun beginRun(header: String) {
+        stopTimers()
         binding.outputPanel.tvOutputText.text = ""
         onShowOutputPanel()
         isRunning = true
         hadError = false
+        outputCount = 0
         runStartNanos = System.nanoTime()
         onRunStateChanged(true)
         setStdinActive(false)
@@ -180,8 +236,33 @@ class ExecutionUiController(
         }
         lastRunTranspiled = false
         wasmTail.setLength(0)
+        wasmReady = false
+        lastStage = "starting"
         beginRun("$ ${id.dir} $name")
+        appendStatusLine("\u2022 Starting ${id.label} (the first run compiles a large WebAssembly file and can take a minute)\u2026", R.color.accent_grey)
+        startHeartbeat("starting ${id.label}")
+        startWatchdog {
+            if (!wasmReady) {
+                wasm.stop()
+                hadError = true
+                appendErrorSummary(
+                    0, "Timeout",
+                    "${id.label} didn't start within ${startupTimeoutMs / 1000} s (last step: $lastStage). " +
+                        "Large WebAssembly runtimes can run out of memory on some phones."
+                )
+                finishRun()
+            }
+        }
         wasm.run(id, getScriptText(), object : WasmRunner.Listener {
+            override fun onStage(text: String) {
+                lastStage = text
+                appendStatusLine("\u2022 $text", R.color.accent_grey)
+                if (text == "Running") {
+                    wasmReady = true
+                    watchdog?.let { handler.removeCallbacks(it) }
+                }
+            }
+
             override fun onOutput(stream: Int, text: String) {
                 appendOutput(text)
                 wasmTail.append(text)
@@ -199,12 +280,10 @@ class ExecutionUiController(
                             ?.groupValues?.get(1)?.toIntOrNull() ?: 0
                     appendErrorSummary(
                         line, if (id == WasmRuntimes.Id.RUBY) "RubyError" else "PHPError",
-                        message.ifBlank { "Execution failed" }
+                        message.ifBlank { "Execution failed" } + " (last step: $lastStage)"
                     )
                 }
-                isRunning = false
-                onRunStateChanged(false)
-                appendFinishLine()
+                finishRun()
             }
         })
     }
@@ -228,24 +307,46 @@ class ExecutionUiController(
         val text = getScriptText()
         val token = ++runToken
         beginRun("$ tsc (transpile only, no type-check) $name")
+        appendStatusLine("\u2022 Compiling TypeScript (the first run loads the compiler; this can take 30 s or more)\u2026", R.color.accent_grey)
+        startHeartbeat("compiling TypeScript")
         val compiler = RuntimeInstaller.compilerFile(activity)
+        val finished = AtomicBoolean(false)
+
+        startWatchdog {
+            if (token == runToken && finished.compareAndSet(false, true)) {
+                runToken++
+                hadError = true
+                appendErrorSummary(0, "Timeout", "The TypeScript compiler didn't finish within ${startupTimeoutMs / 1000} s.")
+                finishRun()
+            }
+        }
 
         Thread(null, {
-            val result = try { TsTranspiler.transpile(compiler, text, name) } catch (t: Throwable) { null }
+            var failure: String? = null
+            val result = try {
+                TsTranspiler.transpile(compiler, text, name)
+            } catch (t: Throwable) {
+                failure = t.javaClass.simpleName + ": " + (t.message ?: "no message")
+                null
+            }
             activity.runOnUiThread {
-                if (token != runToken) return@runOnUiThread
+                if (token != runToken || !finished.compareAndSet(false, true)) return@runOnUiThread
+                watchdog?.let { handler.removeCallbacks(it) }
                 val js = result?.js
                 if (js == null) {
                     val first = result?.errors?.firstOrNull()
                     hadError = true
-                    appendErrorSummary(first?.first ?: 0, "SyntaxError", first?.second ?: "The TypeScript compiler failed")
-                    isRunning = false
-                    onRunStateChanged(false)
-                    appendFinishLine()
+                    appendErrorSummary(
+                        first?.first ?: 0, if (first != null) "SyntaxError" else "CompilerError",
+                        first?.second ?: ("The TypeScript compiler failed: " + (failure ?: "unknown error"))
+                    )
+                    finishRun()
                     return@runOnUiThread
                 }
+                appendStatusLine("\u2022 Compiled", R.color.accent_grey)
                 val d = decide(js)
                 if (d.browser) {
+                    stopTimers()
                     isRunning = false
                     onRunStateChanged(false)
                     openInBrowser(name, js, d.why)
@@ -323,6 +424,7 @@ class ExecutionUiController(
     }
 
     private fun appendFinishLine() {
+        stopTimers()
         val timePart = if (runStartNanos > 0L) {
             val seconds = (System.nanoTime() - runStartNanos) / 1_000_000_000.0
             " in " + String.format(Locale.US, "%.2f", seconds) + " s"
@@ -372,6 +474,7 @@ class ExecutionUiController(
     }
 
     private fun appendOutput(text: String) {
+        outputCount++
         binding.outputPanel.tvOutputText.append(text)
         trimOutputIfNeeded()
         scrollOutputToEnd()

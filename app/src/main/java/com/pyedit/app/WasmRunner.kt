@@ -5,7 +5,9 @@ import android.net.Uri
 import android.view.ViewGroup
 import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
@@ -21,11 +23,12 @@ import java.io.FileInputStream
  * Runs Ruby / PHP (WebAssembly) in a hidden WebView. Runtime files are served
  * from the installed folder through a virtual host; nothing else is reachable
  * (all other requests, including the network, are blocked). Stop destroys
- * the WebView.
+ * the WebView. Every startup step and every failure is reported to the Listener.
  */
 class WasmRunner(private val activity: AppCompatActivity) {
 
     interface Listener {
+        fun onStage(text: String)
         fun onOutput(stream: Int, text: String)
         fun onDone(ok: Boolean, message: String)
     }
@@ -43,14 +46,22 @@ class WasmRunner(private val activity: AppCompatActivity) {
         }
 
         @JavascriptInterface
+        fun stage(text: String) {
+            activity.runOnUiThread { if (mine == token && running) listener?.onStage(text) }
+        }
+
+        @JavascriptInterface
         fun done(ok: Boolean, message: String) {
-            activity.runOnUiThread {
-                if (mine == token && running) {
-                    running = false
-                    release()
-                    listener?.onDone(ok, message)
-                }
-            }
+            activity.runOnUiThread { finish(mine, ok, message) }
+        }
+    }
+
+    private fun finish(mine: Int, ok: Boolean, message: String) {
+        if (mine == token && running) {
+            running = false
+            val l = listener
+            release()
+            l?.onDone(ok, message)
         }
     }
 
@@ -89,15 +100,38 @@ class WasmRunner(private val activity: AppCompatActivity) {
                     if (request.url.host == host) serve(request.url) else empty(404)
 
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = true
+
+                override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                    if (mine == token && running) {
+                        listener?.onOutput(2, "Load error for ${request.url.path}: ${error.description}\n")
+                    }
+                }
+
+                override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
+                    if (mine == token && running) {
+                        listener?.onOutput(2, "Couldn't load ${request.url.path} (HTTP ${errorResponse.statusCode})\n")
+                    }
+                }
+
+                override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                    finish(
+                        mine, false,
+                        "The WebView process " + (if (detail.didCrash()) "crashed" else "was killed (probably out of memory)")
+                    )
+                    return true
+                }
             }
             wv.webChromeClient = object : WebChromeClient() {
-                override fun onConsoleMessage(m: ConsoleMessage): Boolean = true
+                override fun onConsoleMessage(m: ConsoleMessage): Boolean {
+                    if (mine == token && running && m.messageLevel() == ConsoleMessage.MessageLevel.ERROR) {
+                        listener?.onOutput(2, "[browser] ${m.message()} (line ${m.lineNumber()})\n")
+                    }
+                    return true
+                }
             }
             wv.loadDataWithBaseURL("https://$host/page", page(id, code), "text/html", "utf-8", null)
         } catch (t: Throwable) {
-            running = false
-            release()
-            l.onDone(false, "WebView isn't available: ${t.message}")
+            finish(mine, false, "WebView isn't available: ${t.message}")
         }
     }
 
@@ -138,13 +172,19 @@ window.onunhandledrejection=function(e){var r=e&&e.reason;A.done(false,String(r&
         val src = JSONObject.quote(code)
         return if (id == WasmRuntimes.Id.RUBY) {
             "<!doctype html><html><body>" + prelude +
+                "<script>window.Android.stage('Loading the Ruby runtime script');</script>" +
                 "<script src=\"/ruby/browser.umd.js\"></script><script>" +
                 "(async function(){var A=window.Android;try{" +
                 "var ns=window['ruby-wasm-wasi'];" +
-                "if(!ns||!ns.DefaultRubyVM)throw new Error('The Ruby runtime script did not load');" +
-                "var resp=await fetch('/ruby/ruby+stdlib.wasm');" +
-                "var mod=await WebAssembly.compileStreaming(resp);" +
+                "if(!ns||!ns.DefaultRubyVM)throw new Error('The Ruby runtime script did not load (global ruby-wasm-wasi not found)');" +
+                "A.stage('Compiling WebAssembly (the first run can take 10-60 s)');" +
+                "var url='/ruby/ruby+stdlib.wasm';var mod;" +
+                "try{mod=await WebAssembly.compileStreaming(fetch(url));}" +
+                "catch(e1){A.stage('Streaming compile failed ('+(e1&&e1.message?e1.message:e1)+'); compiling from memory');" +
+                "var r2=await fetch(url);mod=await WebAssembly.compile(await r2.arrayBuffer());}" +
+                "A.stage('Starting Ruby');" +
                 "var r=await ns.DefaultRubyVM(mod);" +
+                "A.stage('Running');" +
                 "r.vm.eval(" + src + ");" +
                 "A.done(true,'');" +
                 "}catch(e){A.done(false,String(e&&e.message?e.message:e));}})();" +
@@ -152,10 +192,13 @@ window.onunhandledrejection=function(e){var r=e&&e.reason;A.done(false,String(r&
         } else {
             "<!doctype html><html><body>" + prelude +
                 "<script>(async function(){var A=window.Android;try{" +
+                "A.stage('Loading the PHP runtime script');" +
                 "var m=await import('/php/PhpWeb.mjs');" +
+                "A.stage('Starting PHP (compiling WebAssembly, the first run can take 10-60 s)');" +
                 "var php=new m.PhpWeb();" +
                 "php.addEventListener('output',function(e){A.write(1,String(e.detail));});" +
                 "php.addEventListener('error',function(e){A.write(2,String(e.detail));});" +
+                "A.stage('Running');" +
                 "var code=await php.run(" + src + ");" +
                 "var ok=(code===0||code===undefined);" +
                 "A.done(ok,ok?'':'exit code '+code);" +
